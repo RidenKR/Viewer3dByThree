@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Viewer - 철도차량 전자매뉴얼</title>
+  <link rel="stylesheet" href="/src/styles/main.css">
+</head>
+
+<body>
+  <div id="app">
+    <!-- 상단 툴바 -->
+    <div id="toolbar">
+      <div class="toolbar-section">
+        <h1>3D Viewer</h1>
+      </div>
+      <div class="toolbar-section" id="file-ops">
+        <button id="btn-open-file" title="파일 열기">Open</button>
+      </div>
+      <input type="file" id="file-input" accept=".gltf,.glb" style="display: none;">
+    </div>
+
+    <!-- 캔버스 영역 -->
+    <div id="canvas-container">
+      <!-- Three.js 캔버스가 여기에 동적으로 추가됩니다 -->
+
+      <!-- 로딩 표시 -->
+      <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p id="loading-text">Loading model...</p>
+      </div>
+
+      <!-- 측정 라벨 컨테이너 -->
+      <div id="labels-container"></div>
+    </div>
+
+    <!-- 상태바 -->
+    <div id="statusbar">
+      <span id="status-text">Ready</span>
+      <span id="model-info"></span>
+    </div>
+
+    <!-- 하단 아이콘 툴바 -->
+    <div id="bottom-toolbar">
+      <!-- Home 버튼 -->
+      <div class="bottom-toolbar-section">
+        <button id="btn-bottom-home" class="icon-btn" title="홈 (초기 뷰)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Camera View 드롭다운 -->
+      <div class="bottom-toolbar-section camera-view-section">
+        <button id="btn-bottom-camera-view" class="icon-btn" title="카메라 방향 선택">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+            <line x1="12" y1="22.08" x2="12" y2="12" />
+          </svg>
+        </button>
+        <div id="camera-view-dropdown" class="camera-view-dropdown hidden">
+          <button class="camera-view-option" data-view="iso">
+            <span class="view-cube-icon iso"></span><span>Isometric</span>
+          </button>
+          <button class="camera-view-option" data-view="front">
+            <span class="view-cube-icon front"></span><span>Front</span>
+          </button>
+          <button class="camera-view-option" data-view="back">
+            <span class="view-cube-icon back"></span><span>Back</span>
+          </button>
+          <button class="camera-view-option" data-view="left">
+            <span class="view-cube-icon left"></span><span>Left</span>
+          </button>
+          <button class="camera-view-option" data-view="right">
+            <span class="view-cube-icon right"></span><span>Right</span>
+          </button>
+          <button class="camera-view-option" data-view="top">
+            <span class="view-cube-icon top"></span><span>Top</span>
+          </button>
+          <button class="camera-view-option" data-view="bottom">
+            <span class="view-cube-icon bottom"></span><span>Bottom</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Projection 토글 -->
+      <div class="bottom-toolbar-section">
+        <button id="btn-bottom-projection" class="icon-btn" title="투영 모드 전환">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 3L2 8l10 5 10-5-10-5z" />
+            <path d="M2 8v8l10 5V13L2 8z" fill="currentColor" opacity="0.3" />
+            <path d="M22 8v8l-10 5V13l10-5z" fill="currentColor" opacity="0.5" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- View Mode 드롭다운 -->
+      <div class="bottom-toolbar-section view-mode-section">
+        <button id="btn-bottom-view-mode" class="icon-btn btn-active" title="뷰 모드 선택">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" fill="currentColor" />
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+            <line x1="12" y1="22.08" x2="12" y2="12" />
+          </svg>
+        </button>
+        <div id="view-mode-dropdown" class="view-mode-dropdown hidden">
+          <button class="view-mode-option" data-mode="shaded-wireframe">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" fill="currentColor" opacity="0.7" />
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+              <line x1="12" y1="22.08" x2="12" y2="12" />
+              <path d="M3 8v8" stroke-dasharray="2,2" />
+              <path d="M21 8v8" stroke-dasharray="2,2" />
+            </svg>
+            <span>Shaded Wireframe</span>
+          </button>
+          <button class="view-mode-option" data-mode="shaded">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" fill="currentColor" />
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+              <line x1="12" y1="22.08" x2="12" y2="12" />
+            </svg>
+            <span>Shaded</span>
+          </button>
+          <button class="view-mode-option" data-mode="wireframe">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+              <line x1="12" y1="22.08" x2="12" y2="12" />
+            </svg>
+            <span>Wireframe</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Fit 버튼 -->
+      <div class="bottom-toolbar-section">
+        <button id="btn-bottom-fit" class="icon-btn" title="전체 보기">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- 도구 그룹 (측정, 어노테이션, 섹션, 스냅샷) -->
+      <div class="bottom-toolbar-section tool-group">
+        <!-- 측정 도구 드롭다운 -->
+        <div class="measure-menu-container">
+          <button id="btn-bottom-measure-menu" class="icon-btn" title="측정 도구">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.42 6.58l-4-4a2 2 0 0 0-2.83 0l-12 12a2 2 0 0 0 0 2.83l4 4a2 2 0 0 0 2.83 0l12-12a2 2 0 0 0 0-2.83z" />
+              <line x1="10.59" y1="13.41" x2="8" y2="16" />
+              <line x1="14" y1="10" x2="16" y2="8" />
+              <line x1="8.5" y1="8.5" x2="10" y2="7" />
+              <line x1="17" y1="17" x2="15.5" y2="15.5" />
+            </svg>
+          </button>
+          <div id="measure-menu-dropdown" class="measure-menu-dropdown hidden">
+            <button class="measure-menu-option" data-measure="distance" title="2점 거리 측정">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.42 6.58l-4-4a2 2 0 0 0-2.83 0l-12 12a2 2 0 0 0 0 2.83l4 4a2 2 0 0 0 2.83 0l12-12a2 2 0 0 0 0-2.83z" />
+                <line x1="10.59" y1="13.41" x2="8" y2="16" />
+                <line x1="14" y1="10" x2="16" y2="8" />
+              </svg>
+              <span>Distance</span>
+            </button>
+            <button class="measure-menu-option" data-measure="edge" title="모서리 길이 측정 (1-click)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="4" y1="20" x2="20" y2="4" />
+                <circle cx="4" cy="20" r="2.5" fill="currentColor" />
+                <circle cx="20" cy="4" r="2.5" fill="currentColor" />
+              </svg>
+              <span>Edge Length</span>
+            </button>
+            <button class="measure-menu-option" data-measure="diameter3p" title="3점 지름 측정">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="9" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <circle cx="5" cy="8" r="1.5" fill="currentColor" />
+                <circle cx="19" cy="8" r="1.5" fill="currentColor" />
+                <circle cx="12" cy="21" r="1.5" fill="currentColor" />
+              </svg>
+              <span>Diameter (3pt)</span>
+            </button>
+            <button class="measure-menu-option" data-measure="diameter2p" title="2점 지름 측정">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="9" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <circle cx="3" cy="12" r="1.5" fill="currentColor" />
+                <circle cx="21" cy="12" r="1.5" fill="currentColor" />
+              </svg>
+              <span>Diameter (2pt)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 어노테이션 드롭다운 -->
+        <div class="annotate-menu-container">
+          <button id="btn-bottom-annotate" class="icon-btn" title="어노테이션 추가">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+              <circle cx="12" cy="10" r="3" />
+            </svg>
+          </button>
+          <div id="annotate-menu-dropdown" class="annotate-menu-dropdown hidden">
+            <button class="annotate-menu-option" data-annotate="text" title="텍스트 어노테이션">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+              </svg>
+              <span>Text</span>
+            </button>
+            <button class="annotate-menu-option" data-annotate="rect" title="사각형 어노테이션">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              </svg>
+              <span>Rectangle</span>
+            </button>
+            <button class="annotate-menu-option" data-annotate="circle" title="원형 어노테이션">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+              </svg>
+              <span>Circle</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Section 버튼 -->
+        <button id="btn-bottom-section" class="icon-btn" title="단면 보기">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3,2" />
+            <path d="M3 12v9a2 2 0 002 2h14a2 2 0 002-2v-9" fill="currentColor" opacity="0.3" />
+          </svg>
+        </button>
+
+        <!-- Snapshot 버튼 -->
+        <button id="btn-bottom-snapshot" class="icon-btn" title="화면 캡처">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+            <circle cx="12" cy="13" r="4" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- BOM 메뉴 -->
+      <div class="bottom-toolbar-section bom-section">
+        <button id="btn-bottom-bom" class="icon-btn bom-text-btn" title="BOM 메뉴">BOM</button>
+        <div id="bom-dropdown" class="bom-dropdown hidden">
+          <button class="bom-option" data-action="view"><span>BOM 보기</span></button>
+          <button class="bom-option" data-action="select"><span>BOM 파일 선택</span></button>
+        </div>
+        <input type="file" id="bom-file-input" accept=".csv" style="display: none;">
+      </div>
+
+      <!-- 설정 버튼 -->
+      <div class="bottom-toolbar-section settings-section">
+        <button id="btn-bottom-settings" class="icon-btn" title="환경 설정">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Panel -->
+  <div id="settings-panel" class="settings-panel hidden">
+    <div class="settings-header">
+      <span>환경 설정</span>
+      <button id="settings-close">&times;</button>
+    </div>
+    <div class="settings-body">
+      <div class="setting-group-title">뷰어 재질 및 조명</div>
+      <div class="setting-item">
+        <label>표면 색상</label>
+        <div class="color-picker-wrapper">
+          <input type="color" id="material-color-input" value="#a6b3bf">
+          <span id="color-hex-value">#a6b3bf</span>
+        </div>
+      </div>
+      <div class="setting-item">
+        <label>모델 밝기</label>
+        <input type="range" id="gamma-slider" min="0.1" max="3.0" step="0.1" value="1.0">
+        <span id="gamma-value">1.0</span>
+      </div>
+      <div class="setting-actions">
+        <button id="btn-material-reset">기본값 복원</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOM Panel -->
+  <div id="bom-panel" class="bom-panel hidden">
+    <div class="bom-header">
+      <h3>Bill of Materials</h3>
+      <button id="bom-close" class="bom-close-btn">&times;</button>
+    </div>
+    <div class="bom-content">
+      <table id="bom-table" class="bom-table">
+        <thead>
+          <tr>
+            <th>No</th>
+            <th>Part Name</th>
+            <th>Quantity</th>
+          </tr>
+        </thead>
+        <tbody id="bom-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Section Panel -->
+  <div id="section-panel" class="section-panel hidden">
+    <div class="section-header">
+      <h3>Section Planes</h3>
+      <button id="section-close" class="section-close-btn">&times;</button>
+    </div>
+    <div class="section-content">
+      <div class="section-controls">
+        <div class="section-axis-buttons">
+          <button class="section-axis-btn" data-axis="x" title="X축 단면"><span class="axis-label">X</span></button>
+          <button class="section-axis-btn" data-axis="y" title="Y축 단면"><span class="axis-label">Y</span></button>
+          <button class="section-axis-btn" data-axis="z" title="Z축 단면"><span class="axis-label">Z</span></button>
+        </div>
+        <div id="section-planes-list" class="section-planes-list">
+          <!-- 활성 단면들이 여기에 동적으로 추가됩니다 -->
+        </div>
+        <div class="section-actions">
+          <button id="btn-clear-sections" class="section-clear-btn">Clear All</button>
+        </div>
+        <label class="section-checkbox-label">
+          <input type="checkbox" id="chk-plane-mesh" checked />
+          <span>기준면 보이기</span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Measurement List Panel -->
+  <div id="measurement-list-panel" class="measurement-list-panel hidden">
+    <div class="measurement-list-header">
+      <span>Measurement</span>
+      <button id="measurement-list-close" class="measurement-list-close-btn">&times;</button>
+    </div>
+    <ul id="measurement-list" class="measurement-list"></ul>
+    <div class="measurement-list-footer">
+      <div id="measurement-list-total" class="measurement-list-total hidden">
+        <span class="measurement-total-label">Total length :</span>
+        <span id="measurement-total-value" class="measurement-total-value"></span>
+      </div>
+      <button id="btn-measurement-clear-all" class="measurement-list-clear-btn">Clear All</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+
+</html>
