@@ -228,7 +228,7 @@ export class Diameter2Point {
     const diamVec = new THREE.Vector3().subVectors(p2, p1).normalize();
     const camera = this.viewer.cameraManager.getActiveCamera();
     const viewDir = new THREE.Vector3().subVectors(
-      this.viewer.cameraManager.controls.target,
+      this.viewer.cameraManager.target,
       camera.position
     ).normalize();
 

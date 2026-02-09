@@ -78,12 +78,12 @@ export class Viewer {
     this.modelLoader = new ModelLoader(this.scene);
 
     // FastNav 최적화: 네비게이션 중 해상도 감소
-    this.cameraManager.controls.addEventListener('start', () => {
+    this.cameraManager.onNavigationStart = () => {
       this.isNavigating = true;
-    });
-    this.cameraManager.controls.addEventListener('end', () => {
+    };
+    this.cameraManager.onNavigationEnd = () => {
       this.isNavigating = false;
-    });
+    };
 
     // Resize
     window.addEventListener('resize', () => this._onResize());

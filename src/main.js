@@ -155,9 +155,9 @@ function setupToolbarEvents() {
 // Bottom Toolbar
 // ============================================================
 function setupBottomToolbarEvents() {
-  // Home 버튼
+  // Home 버튼 (전체 리셋 - 파일을 새로 연 것처럼)
   document.getElementById('btn-bottom-home')?.addEventListener('click', () => {
-    viewer.cameraManager.restoreInitialState();
+    resetAll();
   });
 
   // Projection 토글
@@ -330,6 +330,47 @@ function deactivateAllTools() {
   activeTool = null;
   document.getElementById('btn-bottom-measure-menu')?.classList.remove('btn-active');
   document.getElementById('btn-bottom-annotate')?.classList.remove('btn-active');
+}
+
+// ============================================================
+// Reset All (Home)
+// ============================================================
+function resetAll() {
+  // 1. 활성 도구 비활성화
+  deactivateAllTools();
+
+  // 2. 측정 전체 삭제
+  measurementManager?.clearAll();
+  lastMeasurementCount = 0;
+  updateMeasurementList();
+
+  // 3. 섹션 플레인 전체 삭제
+  sectionPlaneManager?.clearAll();
+  // 섹션 패널 UI 리셋
+  document.querySelectorAll('.section-axis-btn').forEach((btn) => {
+    btn.classList.remove('btn-active');
+  });
+  document.getElementById('btn-bottom-section')?.classList.remove('btn-active');
+
+  // 4. 어노테이션 전체 삭제
+  annotationManager?.clearAll?.();
+
+  // 5. 프로젝션을 perspective로 리셋
+  if (viewer.cameraManager.projection === 'orthographic') {
+    viewer.cameraManager.toggleProjection();
+    document.getElementById('btn-bottom-projection')?.classList.remove('btn-active');
+  }
+
+  // 6. 뷰 모드를 shaded로 리셋
+  viewer.setViewMode('shaded');
+
+  // 7. 카메라를 초기 상태로 복원
+  viewer.cameraManager.restoreInitialState();
+
+  // 8. 패널 닫기
+  closeAllDropdowns();
+
+  updateStatus('Reset to initial state');
 }
 
 // ============================================================
@@ -644,7 +685,7 @@ document.addEventListener('keydown', (e) => {
   if (isInput) return;
 
   if (e.key === '1') {
-    viewer.cameraManager.restoreInitialState();
+    resetAll();
   }
 
   if (e.key === 'f') {
