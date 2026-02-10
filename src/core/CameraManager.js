@@ -183,7 +183,7 @@ export class CameraManager {
     }
   }
 
-  // ───── Custom Zoom (로그 스케일 — 일정 체감 비율) ─────
+  // ───── Custom Zoom (로그 스케일) ─────
 
   _zoomCamera(deltaY) {
     const activeCamera = this.getActiveCamera();
@@ -192,15 +192,17 @@ export class CameraManager {
     const currentDist = eyeToTarget.length();
     const dir = eyeToTarget.normalize();
 
-    // 로그 스케일 줌: log(dist)를 일정량씩 증감 → 어느 거리에서든 같은 체감
+    // 로그 스케일 줌
     const logDist = Math.log(currentDist);
-    const step = deltaY * 0.003; // 양수 = 축소, 음수 = 확대
-    const newLogDist = logDist + step;
+    let step = deltaY * 0.001; // 양수 = 축소, 음수 = 확대
 
-    // 최소/최대 거리 제한 (깔끔하게 클램프)
+    // 최소/최대 거리 제한: 한 스텝 후 한계 도달 시 줌 차단 (비율 왜곡 방지)
     const minDist = this.modelSize * 0.001;
     const maxDist = this.modelSize * 100;
-    const newDist = Math.max(minDist, Math.min(maxDist, Math.exp(newLogDist)));
+    const newLogDist = logDist + step;
+    const newDist = Math.exp(newLogDist);
+
+    if (newDist < minDist || newDist > maxDist) return;
 
     activeCamera.position.copy(this.target).addScaledVector(dir, -newDist);
 

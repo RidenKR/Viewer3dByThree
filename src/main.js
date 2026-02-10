@@ -11,6 +11,7 @@ import { DiameterMeasurement } from './tools/DiameterMeasurement.js';
 import { Diameter2Point } from './tools/Diameter2Point.js';
 import { AnnotationManager } from './tools/AnnotationManager.js';
 import { parseCSV, renderBOMTable } from './utils/bomLoader.js';
+import html2canvas from 'html2canvas';
 
 // ============================================================
 // Global State
@@ -361,8 +362,8 @@ function resetAll() {
     document.getElementById('btn-bottom-projection')?.classList.remove('btn-active');
   }
 
-  // 6. 뷰 모드를 shaded로 리셋
-  viewer.setViewMode('shaded');
+  // 6. 뷰 모드를 shaded-wireframe으로 리셋
+  viewer.setViewMode('shaded-wireframe');
 
   // 7. 카메라를 초기 상태로 복원
   viewer.cameraManager.restoreInitialState();
@@ -610,17 +611,30 @@ async function loadBomFile(file) {
 // ============================================================
 // Snapshot
 // ============================================================
-function takeSnapshot() {
-  const canvas = viewer.renderer.domElement;
+async function takeSnapshot() {
+  const container = document.getElementById('canvas-container');
+  if (!container) return;
+
+  // WebGL canvas를 먼저 렌더링
   const camera = viewer.cameraManager.getActiveCamera();
   viewer.renderer.render(viewer.scene, camera);
 
-  const link = document.createElement('a');
-  link.download = `snapshot_${Date.now()}.png`;
-  link.href = canvas.toDataURL('image/png');
-  link.click();
+  try {
+    const canvas = await html2canvas(container, {
+      useCORS: true,
+      backgroundColor: null,
+    });
 
-  updateStatus('Snapshot saved');
+    const link = document.createElement('a');
+    link.download = `snapshot_${Date.now()}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+
+    updateStatus('Snapshot saved');
+  } catch (err) {
+    console.error('Snapshot failed:', err);
+    updateStatus('Snapshot failed');
+  }
 }
 
 // ============================================================

@@ -205,10 +205,11 @@ export class Diameter2Point {
     const normal = this._determineCircleNormal(p1, p2);
 
     // 원 시각화
-    this._createCircleVisualization(center, radius, normal);
+    const circleLine = this._createCircleVisualization(center, radius, normal);
 
     // 측정 생성
-    this.mm.createMeasurement(p1, p2, 'diameter');
+    const measurement = this.mm.createMeasurement(p1, p2, 'diameter');
+    measurement.extras.push(circleLine);
   }
 
   _determineCircleNormal(p1, p2) {
@@ -268,6 +269,7 @@ export class Diameter2Point {
     circleLine.renderOrder = 998;
     this.scene.add(circleLine);
     this.circleLines.push(circleLine);
+    return circleLine;
   }
 
   // ───── Temp Visuals ─────

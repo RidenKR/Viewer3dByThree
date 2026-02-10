@@ -221,7 +221,7 @@ export class DiameterMeasurement {
     }
 
     // 원 시각화 생성
-    this._createCircleVisualization(result.center, result.radius, result.normal);
+    const circleLine = this._createCircleVisualization(result.center, result.radius, result.normal);
 
     // 지름 측정 생성 (center를 통과하는 가상 선분)
     const diameter = result.radius * 2;
@@ -230,7 +230,8 @@ export class DiameterMeasurement {
     const diamStart = result.center.clone().add(dir.clone().multiplyScalar(result.radius));
     const diamEnd = result.center.clone().add(dir.clone().multiplyScalar(-result.radius));
 
-    this.mm.createMeasurement(diamStart, diamEnd, 'diameter');
+    const measurement = this.mm.createMeasurement(diamStart, diamEnd, 'diameter');
+    measurement.extras.push(circleLine);
 
     // 수집 리셋 (계속 측정 가능)
     this._resetCollection();
@@ -274,6 +275,7 @@ export class DiameterMeasurement {
     circleLine.renderOrder = 998;
     this.scene.add(circleLine);
     this.circleLines.push(circleLine);
+    return circleLine;
   }
 
   _resetCollection() {

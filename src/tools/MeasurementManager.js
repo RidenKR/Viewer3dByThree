@@ -145,6 +145,7 @@ export class MeasurementManager {
       label: labelDiv,
       startMarker,
       endMarker,
+      extras: [],  // 추가 scene 객체 (원 등)
     };
 
     this.measurements.push(measurement);
@@ -214,6 +215,14 @@ export class MeasurementManager {
     }
     if (m.label) {
       m.label.remove();
+    }
+    // 추가 scene 객체 (원 등) 정리
+    if (m.extras) {
+      for (const obj of m.extras) {
+        this.scene.remove(obj);
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      }
     }
   }
 
