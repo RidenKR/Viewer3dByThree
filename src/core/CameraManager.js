@@ -30,6 +30,10 @@ export class CameraManager {
     this._lastY = 0;
     this._rotateSpeed = 0.005;
 
+    // Raycast 기반 동적 pivot
+    this._raycaster = new THREE.Raycaster();
+    this._modelGroup = null;  // setModelGroup()으로 설정
+
     // FastNav 콜백
     this.onNavigationStart = null;
     this.onNavigationEnd = null;
@@ -45,7 +49,8 @@ export class CameraManager {
 
     canvas.addEventListener('mousedown', (e) => {
       if (e.button === 0 && !e.shiftKey) {
-        // 좌클릭: 회전
+        // 좌클릭: 회전 — 클릭 지점으로 pivot 갱신
+        this._updatePivotOnOrbitStart(e);
         this._isRotating = true;
       } else if (e.button === 2 || e.button === 1 || (e.button === 0 && e.shiftKey)) {
         // 우클릭/중클릭/Shift+좌클릭: Pan
@@ -145,7 +150,9 @@ export class CameraManager {
    * xeokit 커스텀 Pan과 동일한 로직: viewDir × up → right, right × viewDir → camUp
    */
   _panCamera(camera, dx, dy) {
-    const panSpeed = this.modelSize * 0.002;
+    // 카메라-타겟 거리에 비례: 확대 시 느리게, 축소 시 빠르게
+    const dist = camera.position.distanceTo(this.target);
+    const panSpeed = dist * 0.002;
 
     // 시선 방향
     const viewDir = new THREE.Vector3().subVectors(this.target, camera.position);
@@ -176,33 +183,35 @@ export class CameraManager {
     }
   }
 
-  // ───── Custom Zoom (비율 기반) ─────
+  // ───── Custom Zoom (로그 스케일 — 일정 체감 비율) ─────
 
   _zoomCamera(deltaY) {
     const activeCamera = this.getActiveCamera();
 
-    // eye에서 target까지의 거리
     const eyeToTarget = new THREE.Vector3().subVectors(this.target, activeCamera.position);
     const currentDist = eyeToTarget.length();
-
-    // 비율 기반 줌: deltaY > 0 (아래로) = 축소, deltaY < 0 (위로) = 확대
-    const zoomSensitivity = 0.001;
-    const zoomFactor = 1 + deltaY * zoomSensitivity;
-
-    // 새 거리 (최소 거리 제한: 현재 거리의 0.1%)
-    let newDist = currentDist * zoomFactor;
-    const minDist = currentDist * 0.001;
-    if (newDist < minDist) newDist = minDist;
-
-    // 방향 벡터 정규화
     const dir = eyeToTarget.normalize();
 
-    // 새 eye 위치 (target 기준으로 거리 조정)
+    // 로그 스케일 줌: log(dist)를 일정량씩 증감 → 어느 거리에서든 같은 체감
+    const logDist = Math.log(currentDist);
+    const step = deltaY * 0.003; // 양수 = 축소, 음수 = 확대
+    const newLogDist = logDist + step;
+
+    // 최소/최대 거리 제한 (깔끔하게 클램프)
+    const minDist = this.modelSize * 0.001;
+    const maxDist = this.modelSize * 100;
+    const newDist = Math.max(minDist, Math.min(maxDist, Math.exp(newLogDist)));
+
     activeCamera.position.copy(this.target).addScaledVector(dir, -newDist);
 
-    // Ortho 모드에서는 scale도 조정
+    // near plane 동적 조정
+    activeCamera.near = newDist * 0.001;
+    activeCamera.updateProjectionMatrix();
+
+    // Ortho 모드
     if (this.projection === 'orthographic' && this.orthoCamera) {
-      this.orthoCamera.zoom *= (1 / zoomFactor);
+      const zoomFactor = currentDist / newDist;
+      this.orthoCamera.zoom *= zoomFactor;
       this.orthoCamera.updateProjectionMatrix();
     }
   }
@@ -241,6 +250,58 @@ export class CameraManager {
       this.orthoCamera.far = farClip;
       this.orthoCamera.updateProjectionMatrix();
     }
+  }
+
+  /** Raycast 대상 모델 그룹 설정 (동적 pivot용) */
+  setModelGroup(group) {
+    this._modelGroup = group;
+  }
+
+  /**
+   * 회전 시작 시 클릭 지점의 모델 표면을 pivot으로 설정 (xeokit 방식)
+   * - 모델 위 클릭: 표면 히트 포인트가 새 회전 중심
+   * - 빈 공간 클릭: 기존 target 유지 (Camera.look 폴백)
+   *
+   * 핵심: target 변경 시 카메라 위치도 같이 이동시켜서
+   * 화면상 보이는 모습은 전혀 변하지 않도록 함 (점프 방지)
+   */
+  _updatePivotOnOrbitStart(e) {
+    if (!this._modelGroup) return;
+
+    const canvas = this.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    const activeCamera = this.getActiveCamera();
+    this._raycaster.setFromCamera(mouse, activeCamera);
+
+    const intersects = this._raycaster.intersectObjects(
+      this._modelGroup.children, true
+    );
+
+    if (intersects.length > 0) {
+      const hitPoint = intersects[0].point;
+
+      // 현재 시선 방향 보존: 히트 포인트를 시선 축에 투영
+      // → 카메라 시선 위의 점을 새 target으로 설정하여 lookAt 점프 방지
+      const viewDir = new THREE.Vector3()
+        .subVectors(this.target, activeCamera.position)
+        .normalize();
+
+      // 히트 포인트를 시선 축에 투영: camera + viewDir * t
+      const camToHit = new THREE.Vector3().subVectors(hitPoint, activeCamera.position);
+      const t = camToHit.dot(viewDir);
+
+      if (t > 0) {
+        // 시선 축 위의 투영 점을 새 target으로 설정
+        const newTarget = activeCamera.position.clone().addScaledVector(viewDir, t);
+        this.target.copy(newTarget);
+      }
+    }
+    // else: 빈 공간 → 기존 this.target 유지
   }
 
   /** 초기 카메라 상태 저장 (Home 버튼용) */

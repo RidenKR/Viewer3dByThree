@@ -121,6 +121,7 @@ export class Viewer {
 
     // 카메라 설정
     this.cameraManager.setModelBounds(bounds);
+    this.cameraManager.setModelGroup(result.model);
     this.cameraManager.fitAll(result.model);
     this.cameraManager.saveInitialState();
 
