@@ -1,7 +1,13 @@
 /**
  * DistanceMeasurement - 2점 거리 측정 (Edge snap 지원)
+ *
+ * 성능 최적화:
+ * - Raycast-first: mesh 표면 히트 → 근처 엣지 끝점/엣지 위 점만 검색
+ * - 50ms throttle
+ * - mesh별 엣지 그룹화 (Map)
  */
 import * as THREE from 'three';
+import { createFixedMarker } from './MeasurementManager.js';
 
 export class DistanceMeasurement {
   constructor(viewer, measurementManager) {
@@ -17,9 +23,17 @@ export class DistanceMeasurement {
     this.snapPoint = null;
     this.snapMarker = null;
 
-    // Edge 데이터 (Edge snap용)
-    this.edgeData = [];
+    // Edge 데이터 (mesh별 그룹화)
+    this.edgeDataByMesh = new Map();
     this.meshList = [];
+    this.searchRadius3D = 0;
+
+    // Raycaster
+    this._raycaster = new THREE.Raycaster();
+    this._mouse = new THREE.Vector2();
+
+    // Throttle
+    this._moveThrottle = false;
 
     // Binding
     this._onMouseMove = this._onMouseMove.bind(this);
@@ -60,11 +74,12 @@ export class DistanceMeasurement {
   // ───── Edge Data Extraction ─────
 
   _extractEdgeData() {
-    this.edgeData = [];
+    this.edgeDataByMesh = new Map();
     this.meshList = [];
     const model = this.viewer.modelLoader.model;
     if (!model) return;
 
+    let totalEdges = 0;
     model.traverse((child) => {
       if (child.isMesh && child.geometry) {
         this.meshList.push(child);
@@ -81,76 +96,165 @@ export class DistanceMeasurement {
           const end = new THREE.Vector3(positions[i + 3], positions[i + 4], positions[i + 5]);
           start.applyMatrix4(matrix);
           end.applyMatrix4(matrix);
-          edges.push({ start, end, length: start.distanceTo(end) });
+          const midPoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+          edges.push({ start, end, length: start.distanceTo(end), midPoint });
         }
 
+        totalEdges += edges.length;
         if (edges.length > 0) {
-          this.edgeData.push({ mesh: child, edges });
+          this.edgeDataByMesh.set(child, edges);
         }
         edgesGeom.dispose();
       }
     });
+
+    // 3D 검색 반경: 모델 바운딩 스피어의 2%
+    const box = new THREE.Box3().setFromObject(model);
+    const sphere = new THREE.Sphere();
+    box.getBoundingSphere(sphere);
+    this.searchRadius3D = sphere.radius * 0.02;
   }
 
-  // ───── Snap Point ─────
+  // ───── Snap Point (Raycast-first) ─────
 
   _findSnapPoint(mouseX, mouseY) {
     const camera = this.viewer.cameraManager.getActiveCamera();
     const canvas = this.viewer.renderer.domElement;
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
-    const maxDistance = 20;
-    const endpointPriority = 10;
+    const endpointPriority = 10; // 끝점 우선 범위 (px)
+    const maxEdgeDist = 20; // 엣지 위 점 최대 거리 (px)
+
+    // 1단계: Raycast로 표면 히트
+    this._mouse.x = (mouseX / width) * 2 - 1;
+    this._mouse.y = -(mouseY / height) * 2 + 1;
+    this._raycaster.setFromCamera(this._mouse, camera);
+
+    const intersects = this._raycaster.intersectObjects(this.meshList, false);
+
+    if (intersects.length === 0) {
+      // 히트 없으면 surface point 반환
+      return null;
+    }
+
+    const hit = intersects[0];
+    const hitPoint = hit.point;
+    const hitMesh = hit.object;
+    const hitDepth = hit.distance;
+
+    // 2단계: 히트된 mesh의 엣지 중 근처 것만 검색
+    const meshEdges = this.edgeDataByMesh.get(hitMesh);
+    if (!meshEdges || meshEdges.length === 0) {
+      // 엣지 없는 mesh면 표면 히트 포인트 반환
+      return hitPoint.clone();
+    }
+
+    const searchRadius = Math.max(this.searchRadius3D, hitDepth * 0.03);
+    const searchRadiusSq = searchRadius * searchRadius;
+    const depthTolerance = searchRadius;
 
     let closestPoint = null;
     let closestDistance = Infinity;
     let isEndpoint = false;
 
-    for (const data of this.edgeData) {
-      for (const edge of data.edges) {
-        const screenStart = edge.start.clone().project(camera);
-        const screenEnd = edge.end.clone().project(camera);
+    for (const edge of meshEdges) {
+      // 3D 거리로 1차 필터링
+      const distToMidSq = hitPoint.distanceToSquared(edge.midPoint);
+      const distToStartSq = hitPoint.distanceToSquared(edge.start);
+      const distToEndSq = hitPoint.distanceToSquared(edge.end);
+      const minDistSq = Math.min(distToMidSq, distToStartSq, distToEndSq);
+      if (minDistSq > searchRadiusSq) continue;
 
-        if (screenStart.z > 1 && screenEnd.z > 1) continue;
+      // 깊이 필터
+      const edgeDepth = camera.position.distanceTo(edge.midPoint);
+      if (edgeDepth > hitDepth + depthTolerance) continue;
 
-        const startX = (screenStart.x + 1) / 2 * width;
-        const startY = (-screenStart.y + 1) / 2 * height;
-        const endX = (screenEnd.x + 1) / 2 * width;
-        const endY = (-screenEnd.y + 1) / 2 * height;
+      // 스크린 좌표 변환
+      const screenStart = edge.start.clone().project(camera);
+      const screenEnd = edge.end.clone().project(camera);
+      if (screenStart.z > 1 && screenEnd.z > 1) continue;
 
-        // 끝점 우선
-        const distToStart = Math.hypot(mouseX - startX, mouseY - startY);
-        const distToEnd = Math.hypot(mouseX - endX, mouseY - endY);
+      const startX = (screenStart.x + 1) / 2 * width;
+      const startY = (-screenStart.y + 1) / 2 * height;
+      const endX = (screenEnd.x + 1) / 2 * width;
+      const endY = (-screenEnd.y + 1) / 2 * height;
 
-        if (distToStart < endpointPriority && screenStart.z < 1) {
-          if (distToStart < closestDistance || !isEndpoint) {
-            closestPoint = edge.start.clone();
-            closestDistance = distToStart;
-            isEndpoint = true;
-          }
+      // 끝점 우선 검사
+      const distToStart = Math.hypot(mouseX - startX, mouseY - startY);
+      const distToEnd = Math.hypot(mouseX - endX, mouseY - endY);
+
+      if (distToStart < endpointPriority && screenStart.z < 1) {
+        if (distToStart < closestDistance || !isEndpoint) {
+          closestPoint = edge.start.clone();
+          closestDistance = distToStart;
+          isEndpoint = true;
         }
+      }
 
-        if (distToEnd < endpointPriority && screenEnd.z < 1) {
-          if (distToEnd < closestDistance || !isEndpoint) {
-            closestPoint = edge.end.clone();
-            closestDistance = distToEnd;
-            isEndpoint = true;
-          }
+      if (distToEnd < endpointPriority && screenEnd.z < 1) {
+        if (distToEnd < closestDistance || !isEndpoint) {
+          closestPoint = edge.end.clone();
+          closestDistance = distToEnd;
+          isEndpoint = true;
         }
+      }
 
-        // Edge 위의 점 (끝점 없을 때)
-        if (!isEndpoint) {
-          const distToEdge = this._distPointToSegment(mouseX, mouseY, startX, startY, endX, endY);
-          if (distToEdge < maxDistance && distToEdge < closestDistance) {
-            const t = this._getProjectionT(mouseX, mouseY, startX, startY, endX, endY);
-            closestPoint = new THREE.Vector3().lerpVectors(edge.start, edge.end, t);
-            closestDistance = distToEdge;
-          }
+      // Edge 위의 점 (끝점 없을 때만)
+      if (!isEndpoint) {
+        const distToEdge = this._distPointToSegment(mouseX, mouseY, startX, startY, endX, endY);
+        if (distToEdge < maxEdgeDist && distToEdge < closestDistance) {
+          const t = this._getProjectionT(mouseX, mouseY, startX, startY, endX, endY);
+          closestPoint = new THREE.Vector3().lerpVectors(edge.start, edge.end, t);
+          closestDistance = distToEdge;
         }
       }
     }
 
-    return closestPoint;
+    // 대체 히트 mesh 검색
+    if (!closestPoint) {
+      for (let i = 1; i < Math.min(intersects.length, 3); i++) {
+        const altHit = intersects[i];
+        const altEdges = this.edgeDataByMesh.get(altHit.object);
+        if (!altEdges) continue;
+
+        const altRadius = Math.max(this.searchRadius3D, altHit.distance * 0.03);
+        const altRadiusSq = altRadius * altRadius;
+
+        for (const edge of altEdges) {
+          const dSq = Math.min(
+            altHit.point.distanceToSquared(edge.midPoint),
+            altHit.point.distanceToSquared(edge.start),
+            altHit.point.distanceToSquared(edge.end)
+          );
+          if (dSq > altRadiusSq) continue;
+
+          const ss = edge.start.clone().project(camera);
+          const se = edge.end.clone().project(camera);
+          if (ss.z > 1 && se.z > 1) continue;
+
+          const sx = (ss.x + 1) / 2 * width;
+          const sy = (-ss.y + 1) / 2 * height;
+          const ex = (se.x + 1) / 2 * width;
+          const ey = (-se.y + 1) / 2 * height;
+
+          const distToStart = Math.hypot(mouseX - sx, mouseY - sy);
+          if (distToStart < endpointPriority && ss.z < 1 && distToStart < closestDistance) {
+            closestPoint = edge.start.clone();
+            closestDistance = distToStart;
+          }
+
+          const distToEnd = Math.hypot(mouseX - ex, mouseY - ey);
+          if (distToEnd < endpointPriority && se.z < 1 && distToEnd < closestDistance) {
+            closestPoint = edge.end.clone();
+            closestDistance = distToEnd;
+          }
+        }
+        if (closestPoint) break;
+      }
+    }
+
+    // 엣지 근처에 없으면 표면 히트 포인트 반환
+    return closestPoint || hitPoint.clone();
   }
 
   _distPointToSegment(px, py, x1, y1, x2, y2) {
@@ -182,23 +286,8 @@ export class DistanceMeasurement {
     this.snapPoint = point;
 
     if (!this.snapMarker) {
-      const geom = new THREE.SphereGeometry(0.5, 16, 16);
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0x00ff00,
-        depthTest: false,
-        transparent: true,
-        opacity: 0.9,
-      });
-      this.snapMarker = new THREE.Mesh(geom, mat);
+      this.snapMarker = createFixedMarker(point, 0x00ff00, 6);
       this.snapMarker.renderOrder = 1000;
-
-      const modelBounds = this.viewer.modelLoader.modelBounds;
-      if (modelBounds) {
-        const size = modelBounds.getSize(new THREE.Vector3());
-        const scale = Math.max(size.x, size.y, size.z) * 0.015;
-        this.snapMarker.scale.setScalar(scale);
-      }
-
       this.scene.add(this.snapMarker);
     }
 
@@ -210,7 +299,6 @@ export class DistanceMeasurement {
     this.snapPoint = null;
     if (this.snapMarker) {
       this.scene.remove(this.snapMarker);
-      this.snapMarker.geometry.dispose();
       this.snapMarker.material.dispose();
       this.snapMarker = null;
     }
@@ -219,6 +307,11 @@ export class DistanceMeasurement {
   // ───── Event Handlers ─────
 
   _onMouseMove(event) {
+    // 50ms throttle
+    if (this._moveThrottle) return;
+    this._moveThrottle = true;
+    setTimeout(() => { this._moveThrottle = false; }, 50);
+
     const rect = this.viewer.renderer.domElement.getBoundingClientRect();
     const mouseX = event.clientX - rect.left;
     const mouseY = event.clientY - rect.top;
@@ -266,23 +359,7 @@ export class DistanceMeasurement {
   // ───── Temp Visuals ─────
 
   _createTempMarker(position, color) {
-    const geom = new THREE.SphereGeometry(0.5, 16, 16);
-    const mat = new THREE.MeshBasicMaterial({
-      color,
-      depthTest: false,
-      transparent: true,
-      opacity: 0.8,
-    });
-    const marker = new THREE.Mesh(geom, mat);
-    marker.position.copy(position);
-    marker.renderOrder = 999;
-
-    const modelBounds = this.viewer.modelLoader.modelBounds;
-    if (modelBounds) {
-      const size = modelBounds.getSize(new THREE.Vector3());
-      marker.scale.setScalar(Math.max(size.x, size.y, size.z) * 0.02);
-    }
-
+    const marker = createFixedMarker(position, color, 8);
     this.scene.add(marker);
     return marker;
   }
@@ -320,7 +397,6 @@ export class DistanceMeasurement {
 
     if (this.firstMarker) {
       this.scene.remove(this.firstMarker);
-      this.firstMarker.geometry.dispose();
       this.firstMarker.material.dispose();
       this.firstMarker = null;
     }
@@ -354,5 +430,7 @@ export class DistanceMeasurement {
   dispose() {
     this.deactivate();
     this._clearSnapMarker();
+    this.edgeDataByMesh.clear();
+    this.meshList = [];
   }
 }

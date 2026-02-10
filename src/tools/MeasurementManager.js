@@ -1,8 +1,55 @@
 /**
  * MeasurementManager - 측정 도구 공통 인프라
  * HTML overlay 기반 측정 라벨, 마커, 라인 관리
+ *
+ * 마커는 THREE.Sprite + sizeAttenuation:false → 화면상 고정 크기 (매 프레임 계산 불필요)
  */
 import * as THREE from 'three';
+
+// 원형 마커 텍스처 (Canvas 기반, 1회 생성 후 재사용)
+let _circleTexture = null;
+function getCircleTexture() {
+  if (_circleTexture) return _circleTexture;
+  const size = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  _circleTexture = new THREE.CanvasTexture(canvas);
+  return _circleTexture;
+}
+
+/**
+ * 화면상 고정 크기 원형 마커 생성 (Sprite)
+ * @param {THREE.Vector3} position
+ * @param {number} color - hex color
+ * @param {number} pixelSize - 화면상 크기 (기본 6)
+ * @returns {THREE.Sprite}
+ */
+export function createFixedMarker(position, color, pixelSize = 6) {
+  const mat = new THREE.SpriteMaterial({
+    map: getCircleTexture(),
+    color,
+    depthTest: false,
+    transparent: true,
+    opacity: 0.9,
+    sizeAttenuation: false, // 핵심: 카메라 거리와 무관하게 고정 크기
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.position.copy(position);
+  sprite.renderOrder = 999;
+  // sizeAttenuation:false일 때 scale은 NDC 단위 (1 = 화면 전체 높이)
+  // pixelSize 픽셀을 원하면: scale = pixelSize / canvasHeight
+  // 이 값은 resize 시 업데이트가 필요하지만, 마커 수가 적어 무시 가능
+  // 기본 캔버스 높이 800 기준 합리적인 값 사용
+  const ndcScale = pixelSize / 800;
+  sprite.scale.set(ndcScale, ndcScale, 1);
+  return sprite;
+}
 
 export class MeasurementManager {
   constructor(viewer, labelsContainerId = 'labels-container') {
@@ -34,10 +81,6 @@ export class MeasurementManager {
 
   /**
    * 거리 측정 생성 (라인 + 마커 + 라벨)
-   * @param {THREE.Vector3} start
-   * @param {THREE.Vector3} end
-   * @param {string} type - 'distance' | 'edge' | 'diameter'
-   * @returns {object} measurement 객체
    */
   createMeasurement(start, end, type = 'distance') {
     const id = this.nextId++;
@@ -76,9 +119,11 @@ export class MeasurementManager {
     line.renderOrder = 998;
     this.scene.add(line);
 
-    // 시작/끝 마커
-    const startMarker = this._createPointMarker(start, 0x00ff00);
-    const endMarker = this._createPointMarker(end, 0xff4444);
+    // 시작/끝 마커 (Sprite - 화면 고정 크기)
+    const startMarker = createFixedMarker(start, color, 8);
+    const endMarker = createFixedMarker(end, color, 8);
+    this.scene.add(startMarker);
+    this.scene.add(endMarker);
 
     // HTML 라벨
     const labelDiv = document.createElement('div');
@@ -107,34 +152,8 @@ export class MeasurementManager {
   }
 
   /**
-   * 단일 점 마커 생성
-   */
-  _createPointMarker(position, color) {
-    const geometry = new THREE.SphereGeometry(0.5, 16, 16);
-    const material = new THREE.MeshBasicMaterial({
-      color,
-      depthTest: false,
-      transparent: true,
-      opacity: 0.8,
-    });
-    const marker = new THREE.Mesh(geometry, material);
-    marker.position.copy(position);
-    marker.renderOrder = 999;
-
-    // 모델 크기에 비례한 스케일
-    const modelLoader = this.viewer.modelLoader;
-    if (modelLoader.modelBounds) {
-      const size = modelLoader.modelBounds.getSize(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.y, size.z);
-      marker.scale.setScalar(maxDim * 0.012);
-    }
-
-    this.scene.add(marker);
-    return marker;
-  }
-
-  /**
    * 측정 라벨 위치 업데이트 (매 프레임)
+   * 마커 스케일은 Sprite sizeAttenuation:false로 자동 처리되므로 업데이트 불필요
    */
   updateLabels(camera) {
     const width = this.viewer.renderer.domElement.clientWidth;
@@ -159,7 +178,6 @@ export class MeasurementManager {
 
   /**
    * 특정 측정 삭제
-   * @param {number} id
    */
   removeMeasurement(id) {
     const idx = this.measurements.findIndex(m => m.id === id);
@@ -188,12 +206,10 @@ export class MeasurementManager {
     }
     if (m.startMarker) {
       this.scene.remove(m.startMarker);
-      m.startMarker.geometry.dispose();
       m.startMarker.material.dispose();
     }
     if (m.endMarker) {
       this.scene.remove(m.endMarker);
-      m.endMarker.geometry.dispose();
       m.endMarker.material.dispose();
     }
     if (m.label) {

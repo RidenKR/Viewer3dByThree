@@ -3,6 +3,7 @@
  * 2개의 점을 지름의 양 끝점으로 사용하여 지름 및 원 시각화
  */
 import * as THREE from 'three';
+import { createFixedMarker } from './MeasurementManager.js';
 
 export class Diameter2Point {
   constructor(viewer, measurementManager) {
@@ -137,21 +138,8 @@ export class Diameter2Point {
     this.snapPoint = point;
 
     if (!this.snapMarker) {
-      const geom = new THREE.SphereGeometry(0.5, 16, 16);
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0x00e5ff,
-        depthTest: false,
-        transparent: true,
-        opacity: 0.9,
-      });
-      this.snapMarker = new THREE.Mesh(geom, mat);
+      this.snapMarker = createFixedMarker(point, 0x00e5ff, 6);
       this.snapMarker.renderOrder = 1000;
-
-      const modelBounds = this.viewer.modelLoader.modelBounds;
-      if (modelBounds) {
-        const size = modelBounds.getSize(new THREE.Vector3());
-        this.snapMarker.scale.setScalar(Math.max(size.x, size.y, size.z) * 0.015);
-      }
       this.scene.add(this.snapMarker);
     }
 
@@ -163,7 +151,6 @@ export class Diameter2Point {
     this.snapPoint = null;
     if (this.snapMarker) {
       this.scene.remove(this.snapMarker);
-      this.snapMarker.geometry.dispose();
       this.snapMarker.material.dispose();
       this.snapMarker = null;
     }
@@ -286,23 +273,7 @@ export class Diameter2Point {
   // ───── Temp Visuals ─────
 
   _createMarker(position, color) {
-    const geom = new THREE.SphereGeometry(0.5, 16, 16);
-    const mat = new THREE.MeshBasicMaterial({
-      color,
-      depthTest: false,
-      transparent: true,
-      opacity: 0.8,
-    });
-    const marker = new THREE.Mesh(geom, mat);
-    marker.position.copy(position);
-    marker.renderOrder = 999;
-
-    const modelBounds = this.viewer.modelLoader.modelBounds;
-    if (modelBounds) {
-      const size = modelBounds.getSize(new THREE.Vector3());
-      marker.scale.setScalar(Math.max(size.x, size.y, size.z) * 0.015);
-    }
-
+    const marker = createFixedMarker(position, color, 8);
     this.scene.add(marker);
     return marker;
   }
@@ -340,7 +311,6 @@ export class Diameter2Point {
 
     if (this.firstMarker) {
       this.scene.remove(this.firstMarker);
-      this.firstMarker.geometry.dispose();
       this.firstMarker.material.dispose();
       this.firstMarker = null;
     }

@@ -3,6 +3,7 @@
  * 3개의 점으로 외접원(circumscribed circle)을 계산하여 지름 표시
  */
 import * as THREE from 'three';
+import { createFixedMarker } from './MeasurementManager.js';
 
 export class DiameterMeasurement {
   constructor(viewer, measurementManager) {
@@ -137,21 +138,8 @@ export class DiameterMeasurement {
     this.snapPoint = point;
 
     if (!this.snapMarker) {
-      const geom = new THREE.SphereGeometry(0.5, 16, 16);
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0xff6b35,
-        depthTest: false,
-        transparent: true,
-        opacity: 0.9,
-      });
-      this.snapMarker = new THREE.Mesh(geom, mat);
+      this.snapMarker = createFixedMarker(point, 0xff6b35, 6);
       this.snapMarker.renderOrder = 1000;
-
-      const modelBounds = this.viewer.modelLoader.modelBounds;
-      if (modelBounds) {
-        const size = modelBounds.getSize(new THREE.Vector3());
-        this.snapMarker.scale.setScalar(Math.max(size.x, size.y, size.z) * 0.015);
-      }
       this.scene.add(this.snapMarker);
     }
 
@@ -163,7 +151,6 @@ export class DiameterMeasurement {
     this.snapPoint = null;
     if (this.snapMarker) {
       this.scene.remove(this.snapMarker);
-      this.snapMarker.geometry.dispose();
       this.snapMarker.material.dispose();
       this.snapMarker = null;
     }
@@ -203,23 +190,7 @@ export class DiameterMeasurement {
     const colors = [0xff6b35, 0xff9800, 0xffdd57];
     const color = colors[(index - 1) % colors.length];
 
-    const geom = new THREE.SphereGeometry(0.5, 16, 16);
-    const mat = new THREE.MeshBasicMaterial({
-      color,
-      depthTest: false,
-      transparent: true,
-      opacity: 0.8,
-    });
-    const marker = new THREE.Mesh(geom, mat);
-    marker.position.copy(position);
-    marker.renderOrder = 999;
-
-    const modelBounds = this.viewer.modelLoader.modelBounds;
-    if (modelBounds) {
-      const size = modelBounds.getSize(new THREE.Vector3());
-      marker.scale.setScalar(Math.max(size.x, size.y, size.z) * 0.012);
-    }
-
+    const marker = createFixedMarker(position, color, 8);
     this.scene.add(marker);
     this.pointMarkers.push(marker);
   }
@@ -311,7 +282,6 @@ export class DiameterMeasurement {
     // 점 마커 제거
     this.pointMarkers.forEach(m => {
       this.scene.remove(m);
-      m.geometry.dispose();
       m.material.dispose();
     });
     this.pointMarkers = [];
