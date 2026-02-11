@@ -89,13 +89,23 @@ function onModelLoaded(result) {
   updateStatus(`Model loaded: ${fileName}`);
 
   hideLoading();
+
+  // 백그라운드 병합 진행 상태 표시
+  viewer.onMergeProgress((msg) => {
+    if (msg) {
+      updateStatus(msg);
+    } else {
+      updateStatus(`Model loaded: ${fileName}`);
+    }
+  });
 }
 
 function onFPSUpdate(fps) {
   const statusText = document.getElementById('status-text');
   if (statusText) {
-    const currentText = statusText.textContent.replace(/\s*\|\s*\d+ FPS$/, '');
-    statusText.textContent = `${currentText} | ${fps} FPS`;
+    const currentText = statusText.textContent.replace(/\s*\|.*$/, '');
+    const info = viewer.getRenderInfo();
+    statusText.textContent = `${currentText} | ${fps} FPS | DC:${info.calls} | Tris:${(info.triangles / 1000).toFixed(0)}K`;
   }
 }
 
@@ -694,6 +704,14 @@ document.addEventListener('keydown', (e) => {
     lastMeasurementCount = 0;
     updateMeasurementList();
     updateStatus('All measurements cleared');
+  }
+
+  // Ctrl+Shift+S: Stats 오버레이 토글
+  if (e.key === 'S' && e.ctrlKey && e.shiftKey) {
+    e.preventDefault();
+    viewer.enableStats(!viewer._statsEnabled);
+    updateStatus(viewer._statsEnabled ? 'Stats overlay ON' : 'Stats overlay OFF');
+    return;
   }
 
   if (isInput) return;

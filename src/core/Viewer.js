@@ -31,10 +31,19 @@ export class Viewer {
     this.currentFPS = 0;
     this.animationId = null;
     this.isNavigating = false;
+    this.isMerging = false; // 백그라운드 병합 진행 중
+
+    // FastNav
+    this.basePixelRatio = window.devicePixelRatio;
 
     // View mode
     this.viewMode = 'shaded-wireframe'; // 'shaded' | 'wireframe' | 'shaded-wireframe'
     this.edgeThreshold = 80;
+
+    // Stats
+    this._statsEnabled = false;
+    this._statsDiv = null;
+    this._lastRenderInfo = { calls: 0, triangles: 0, geometries: 0 };
 
     // Callbacks
     this._onUpdate = [];
@@ -65,7 +74,7 @@ export class Viewer {
       logarithmicDepthBuffer: true,
     });
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.localClippingEnabled = true;
     this.renderer.shadowMap.enabled = false;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -77,12 +86,14 @@ export class Viewer {
     this.lightManager = new LightManager(this.scene);
     this.modelLoader = new ModelLoader(this.scene);
 
-    // FastNav 최적화: 네비게이션 중 해상도 감소
+    // FastNav: 네비게이션 중 픽셀 비율 감소로 성능 향상
     this.cameraManager.onNavigationStart = () => {
       this.isNavigating = true;
+      this.renderer.setPixelRatio(Math.min(this.basePixelRatio, 1));
     };
     this.cameraManager.onNavigationEnd = () => {
       this.isNavigating = false;
+      this.renderer.setPixelRatio(this.basePixelRatio);
     };
 
     // Resize
@@ -101,7 +112,7 @@ export class Viewer {
    */
   async loadModelFromURL(url, onProgress) {
     const result = await this.modelLoader.loadFromURL(url, onProgress);
-    this._onModelLoadComplete(result);
+    await this._onModelLoadComplete(result);
     return result;
   }
 
@@ -112,11 +123,11 @@ export class Viewer {
    */
   async loadModelFromFile(file, onProgress) {
     const result = await this.modelLoader.loadFromFile(file, onProgress);
-    this._onModelLoadComplete(result);
+    await this._onModelLoadComplete(result);
     return result;
   }
 
-  _onModelLoadComplete(result) {
+  async _onModelLoadComplete(result) {
     const { bounds } = result;
 
     // 카메라 설정
@@ -130,13 +141,53 @@ export class Viewer {
     const maxDim = Math.max(size.x, size.y, size.z);
     this.lightManager.adjustForModel(maxDim);
 
-    // View mode에 따라 Edge 생성
-    if (this.viewMode === 'shaded-wireframe') {
-      this.modelLoader.createEdges(this.edgeThreshold);
-    }
-
-    // 콜백 호출
+    // 콜백 호출 → 모델을 먼저 화면에 보여줌 (원본 메시, draw call 높지만 즉시 표시)
     this._onModelLoaded.forEach(cb => cb(result));
+
+    // 백그라운드 병합: 모델 표시 후 비동기로 기하 병합 + 엣지 생성
+    this._mergeInBackground();
+  }
+
+  /**
+   * 백그라운드 기하 병합 + 엣지 생성
+   * 모델은 이미 화면에 표시된 상태에서 비동기로 최적화 수행
+   */
+  async _mergeInBackground() {
+    this.isMerging = true;
+    this._onMergeProgress?.('Optimizing...');
+
+    try {
+      // 1단계: 기하 병합
+      const mergeStart = performance.now();
+      await this.modelLoader.mergeForRendering((progress) => {
+        const pct = (progress * 100).toFixed(0);
+        this._onMergeProgress?.(`Merging geometry... ${pct}%`);
+      });
+      const mergeTime = ((performance.now() - mergeStart) / 1000).toFixed(1);
+      console.log(`[Viewer] mergeForRendering: ${mergeTime}s`);
+
+      // 2단계: Edge 생성 (shaded-wireframe 모드일 때)
+      if (this.viewMode === 'shaded-wireframe') {
+        this._onMergeProgress?.('Creating edges...');
+        const edgeStart = performance.now();
+        await this.modelLoader.createEdges(this.edgeThreshold);
+        const edgeTime = ((performance.now() - edgeStart) / 1000).toFixed(1);
+        console.log(`[Viewer] createEdges: ${edgeTime}s`);
+      }
+
+      this._onMergeProgress?.(null); // 완료
+      console.log(`[Viewer] Background optimization complete`);
+    } catch (err) {
+      console.error('[Viewer] Background merge error:', err);
+      this._onMergeProgress?.(null);
+    } finally {
+      this.isMerging = false;
+    }
+  }
+
+  /** 백그라운드 병합 진행 콜백 등록 */
+  onMergeProgress(callback) {
+    this._onMergeProgress = callback;
   }
 
   // ───── View Modes ─────
@@ -145,26 +196,40 @@ export class Viewer {
    * View mode 설정
    * @param {'shaded'|'wireframe'|'shaded-wireframe'} mode
    */
-  setViewMode(mode) {
+  async setViewMode(mode) {
     this.viewMode = mode;
     const model = this.modelLoader.model;
     if (!model) return;
 
+    const isMerged = this.modelLoader.geometryMerger.isMerged;
+
     switch (mode) {
       case 'shaded':
-        this._setMeshVisibility(true, false);
+        if (isMerged) {
+          this.modelLoader.setMergedMeshesVisible(true, false);
+        } else {
+          this._setMeshVisibility(true, false);
+        }
         this.modelLoader.setEdgesVisible(false);
         break;
 
       case 'wireframe':
-        this._setMeshVisibility(true, true);
+        if (isMerged) {
+          this.modelLoader.setMergedMeshesVisible(true, true);
+        } else {
+          this._setMeshVisibility(true, true);
+        }
         this.modelLoader.setEdgesVisible(false);
         break;
 
       case 'shaded-wireframe':
-        this._setMeshVisibility(true, false);
+        if (isMerged) {
+          this.modelLoader.setMergedMeshesVisible(true, false);
+        } else {
+          this._setMeshVisibility(true, false);
+        }
         if (this.modelLoader.edgeLines.length === 0) {
-          this.modelLoader.createEdges(this.edgeThreshold);
+          await this.modelLoader.createEdges(this.edgeThreshold);
         }
         this.modelLoader.setEdgesVisible(true);
         break;
@@ -204,6 +269,7 @@ export class Viewer {
     const model = this.modelLoader.model;
     if (!model) return;
 
+    // 원본 메시 (측정 도구용 — visible=false라도 색상 동기화)
     model.traverse((child) => {
       if (child.isMesh && child.material) {
         const materials = Array.isArray(child.material) ? child.material : [child.material];
@@ -211,11 +277,13 @@ export class Viewer {
           if (hexColor) {
             mat.color.set(hexColor);
           }
-          // null이면 원본 유지 (이미 로드 시 설정된 색상)
           mat.needsUpdate = true;
         });
       }
     });
+
+    // 병합 메시
+    this.modelLoader.setMergedColor(hexColor);
   }
 
   /**
@@ -224,6 +292,34 @@ export class Viewer {
    */
   setExposure(exposure) {
     this.renderer.toneMappingExposure = exposure;
+  }
+
+  // ───── Stats Display ─────
+
+  /**
+   * 렌더 통계 오버레이 토글
+   * @param {boolean} enabled
+   */
+  enableStats(enabled) {
+    this._statsEnabled = enabled;
+
+    if (enabled && !this._statsDiv) {
+      this._statsDiv = document.createElement('div');
+      this._statsDiv.style.cssText =
+        'position:absolute;top:8px;left:8px;padding:6px 10px;' +
+        'background:rgba(0,0,0,0.7);color:#0f0;font:11px monospace;' +
+        'pointer-events:none;z-index:100;border-radius:4px;line-height:1.4;white-space:pre;';
+      this.container.appendChild(this._statsDiv);
+    }
+
+    if (this._statsDiv) {
+      this._statsDiv.style.display = enabled ? 'block' : 'none';
+    }
+  }
+
+  /** 현재 렌더 정보 반환 */
+  getRenderInfo() {
+    return { ...this._lastRenderInfo };
   }
 
   // ───── Animation Loop ─────
@@ -237,6 +333,14 @@ export class Viewer {
     const activeCamera = this.cameraManager.getActiveCamera();
     this.renderer.render(this.scene, activeCamera);
 
+    // 렌더 정보 캡처 (render() 직후)
+    const info = this.renderer.info;
+    this._lastRenderInfo = {
+      calls: info.render.calls,
+      triangles: info.render.triangles,
+      geometries: info.memory.geometries,
+    };
+
     // Update 콜백 (측정 라벨 업데이트 등)
     this._onUpdate.forEach(cb => cb(activeCamera));
 
@@ -248,6 +352,16 @@ export class Viewer {
       this.frameCount = 0;
       this.lastFPSTime = elapsed;
       this._onFPSUpdate.forEach(cb => cb(this.currentFPS));
+
+      // Stats 업데이트 (1초마다)
+      if (this._statsEnabled && this._statsDiv) {
+        const r = this._lastRenderInfo;
+        this._statsDiv.textContent =
+          `FPS: ${this.currentFPS}\n` +
+          `Draw Calls: ${r.calls}\n` +
+          `Triangles: ${r.triangles.toLocaleString()}\n` +
+          `Geometries: ${r.geometries}`;
+      }
     }
   }
 
@@ -286,6 +400,10 @@ export class Viewer {
     this.lightManager.dispose();
     this.modelLoader.disposeModel();
     this.renderer.dispose();
+
+    if (this._statsDiv && this._statsDiv.parentNode) {
+      this._statsDiv.parentNode.removeChild(this._statsDiv);
+    }
 
     if (this.renderer.domElement.parentNode) {
       this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);

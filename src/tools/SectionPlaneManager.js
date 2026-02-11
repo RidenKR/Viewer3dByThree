@@ -237,6 +237,11 @@ export class SectionPlaneManager {
       }
     });
 
+    // 병합 메시에도 적용
+    this.viewer.modelLoader.setMergedClipping(
+      this._activeClippingPlanes.length > 0 ? [...this._activeClippingPlanes] : []
+    );
+
     // Edge 라인에도 적용
     this.viewer.modelLoader.setEdgeClipping(
       this._activeClippingPlanes.length > 0 ? [...this._activeClippingPlanes] : null
