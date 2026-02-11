@@ -11,6 +11,7 @@ import { DiameterMeasurement } from './tools/DiameterMeasurement.js';
 import { Diameter2Point } from './tools/Diameter2Point.js';
 import { AnnotationManager } from './tools/AnnotationManager.js';
 import { parseCSV, renderBOMTable } from './utils/bomLoader.js';
+import { GLBOptimizer } from './utils/GLBOptimizer.js';
 import html2canvas from 'html2canvas';
 
 // ============================================================
@@ -27,6 +28,7 @@ let annotationManager = null;
 
 let activeTool = null; // 현재 활성 측정/어노테이션 도구
 let lastMeasurementCount = 0; // 측정 리스트 갱신 체크용
+let glbOptimizer = null;
 
 // ============================================================
 // Initialization
@@ -118,10 +120,14 @@ function checkURLModel() {
 }
 
 async function loadModelFromURL(url) {
-  showLoading('Loading model...');
+  showLoading('Downloading...');
   try {
     await viewer.loadModelFromURL(url, (percent) => {
-      updateLoadingText(`Loading... ${percent}%`);
+      if (percent < 80) {
+        updateLoadingText(`Downloading... ${percent}%`);
+      } else if (percent < 100) {
+        updateLoadingText(`Processing model... ${percent}%`);
+      }
     });
   } catch (error) {
     console.error('Model load error:', error);
@@ -131,10 +137,16 @@ async function loadModelFromURL(url) {
 }
 
 async function loadModelFromFile(file) {
-  showLoading(`Loading ${file.name}...`);
+  showLoading(`Reading ${file.name}...`);
   try {
     await viewer.loadModelFromFile(file, (percent) => {
-      updateLoadingText(`Loading... ${percent}%`);
+      if (percent < 50) {
+        updateLoadingText(`Reading file... ${percent}%`);
+      } else if (percent < 90) {
+        updateLoadingText(`Parsing model... ${percent}%`);
+      } else {
+        updateLoadingText(`Processing... ${percent}%`);
+      }
     });
   } catch (error) {
     console.error('Model load error:', error);
@@ -159,6 +171,123 @@ function setupToolbarEvents() {
         fileInput.value = '';
       }
     });
+  }
+
+  // Optimize 버튼 → 자체 파일 선택 → 최적화 → 다운로드
+  const btnOptimize = document.getElementById('btn-optimize');
+  const optimizeFileInput = document.getElementById('optimize-file-input');
+  if (btnOptimize && optimizeFileInput) {
+    btnOptimize.addEventListener('click', () => optimizeFileInput.click());
+    optimizeFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        optimizeAndDownload(file);
+        optimizeFileInput.value = '';
+      }
+    });
+  }
+
+  // 콘솔 닫기 버튼
+  document.getElementById('optimize-console-close')?.addEventListener('click', () => {
+    document.getElementById('optimize-console')?.classList.add('hidden');
+  });
+}
+
+// ============================================================
+// Optimize Console Helpers
+// ============================================================
+function showOptimizeConsole() {
+  const panel = document.getElementById('optimize-console');
+  const log = document.getElementById('optimize-console-log');
+  const fill = document.getElementById('optimize-progress-fill');
+  if (panel) panel.classList.remove('hidden');
+  if (log) log.innerHTML = '';
+  if (fill) fill.style.width = '0%';
+}
+
+function appendOptimizeLog(message, isHeartbeat = false) {
+  const log = document.getElementById('optimize-console-log');
+  if (!log) return;
+  const line = document.createElement('div');
+  line.className = 'optimize-log-line';
+  const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  line.textContent = `[${time}] ${message}`;
+
+  if (isHeartbeat) {
+    line.classList.add('optimize-log-heartbeat');
+  } else if (message.startsWith('---') || message.startsWith('  Draw Calls:') || message.startsWith('  File Size:')) {
+    line.classList.add('optimize-log-highlight');
+  } else if (message.includes('Already optimized')) {
+    line.classList.add('optimize-log-warn');
+  }
+
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function updateOptimizeProgress(progress) {
+  const fill = document.getElementById('optimize-progress-fill');
+  if (fill) fill.style.width = `${(progress * 100).toFixed(0)}%`;
+}
+
+async function optimizeAndDownload(file) {
+  const btnOptimize = document.getElementById('btn-optimize');
+  if (btnOptimize) {
+    btnOptimize.disabled = true;
+    btnOptimize.textContent = 'Optimizing...';
+  }
+
+  showOptimizeConsole();
+  appendOptimizeLog(`Selected: ${file.name}`);
+
+  // 하트비트: Worker에서 로그가 없는 긴 구간에 경과 시간 표시
+  let lastLogTime = Date.now();
+  let lastStage = '';
+  const heartbeat = setInterval(() => {
+    const elapsed = ((Date.now() - lastLogTime) / 1000).toFixed(0);
+    if (elapsed >= 5) {
+      appendOptimizeLog(`  ... processing (${elapsed}s elapsed)`, true);
+    }
+  }, 5000);
+
+  try {
+    if (!glbOptimizer) {
+      glbOptimizer = new GLBOptimizer();
+    }
+
+    const result = await glbOptimizer.optimizeFile(file, (message, progress) => {
+      lastLogTime = Date.now();
+      lastStage = message;
+      appendOptimizeLog(message);
+      updateOptimizeProgress(progress);
+    });
+
+    clearInterval(heartbeat);
+
+    const { blob, stats } = result;
+
+    if (stats.skipped) {
+      updateStatus(`Already optimized (${stats.before.primitives} meshes, ${stats.before.materials} materials)`);
+    } else if (blob) {
+      const baseName = file.name.replace(/\.(glb|gltf)$/i, '');
+      const fileName = `${baseName}_optimized.glb`;
+      glbOptimizer.downloadBlob(blob, fileName);
+      appendOptimizeLog(`Download: ${fileName}`);
+      updateStatus(
+        `Optimized: ${stats.before.primitives} → ${stats.after.primitives} meshes (${stats.reduction}% reduction)`
+      );
+    }
+  } catch (error) {
+    clearInterval(heartbeat);
+    console.error('Optimize error:', error);
+    appendOptimizeLog(`ERROR: ${error.message}`);
+    updateStatus(`Optimize error: ${error.message}`);
+  } finally {
+    clearInterval(heartbeat);
+    if (btnOptimize) {
+      btnOptimize.disabled = false;
+      btnOptimize.textContent = 'Optimize';
+    }
   }
 }
 

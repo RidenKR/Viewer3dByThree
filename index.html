@@ -17,8 +17,10 @@
       </div>
       <div class="toolbar-section" id="file-ops">
         <button id="btn-open-file" title="파일 열기">Open</button>
+        <button id="btn-optimize" title="GLB 최적화 후 다운로드" class="btn-optimize">Optimize</button>
       </div>
       <input type="file" id="file-input" accept=".gltf,.glb" style="display: none;">
+      <input type="file" id="optimize-file-input" accept=".glb" style="display: none;">
     </div>
 
     <!-- 캔버스 영역 -->
@@ -33,6 +35,20 @@
 
       <!-- 측정 라벨 컨테이너 -->
       <div id="labels-container"></div>
+
+      <!-- Optimize 콘솔 패널 -->
+      <div id="optimize-console" class="optimize-console hidden">
+        <div class="optimize-console-header">
+          <span>GLB Optimizer</span>
+          <button id="optimize-console-close" class="optimize-console-close-btn">&times;</button>
+        </div>
+        <div id="optimize-console-log" class="optimize-console-log"></div>
+        <div class="optimize-console-footer">
+          <div id="optimize-progress-bar" class="optimize-progress-bar">
+            <div id="optimize-progress-fill" class="optimize-progress-fill"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 상태바 -->

@@ -9,8 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "three": "^0.160.0",
-    "html2canvas": "^1.4.1"
+    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/extensions": "^4.3.0",
+    "@gltf-transform/functions": "^4.3.0",
+    "html2canvas": "^1.4.1",
+    "three": "^0.160.0"
   },
   "devDependencies": {
     "vite": "^5.0.0"

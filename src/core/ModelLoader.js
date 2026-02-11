@@ -33,13 +33,16 @@ export class ModelLoader {
       this.loader.load(
         url,
         (gltf) => {
+          if (onProgress) onProgress(90);
           const result = this._processModel(gltf.scene, url.split('/').pop());
+          if (onProgress) onProgress(100);
           resolve(result);
         },
         (progress) => {
           if (onProgress && progress.total > 0) {
-            const percent = (progress.loaded / progress.total * 100).toFixed(1);
-            onProgress(percent);
+            // 다운로드 = 0~80%, 파싱 = 80~100%
+            const percent = Math.round((progress.loaded / progress.total) * 80);
+            onProgress(Math.min(percent, 80));
           }
         },
         (error) => {
@@ -51,32 +54,43 @@ export class ModelLoader {
 
   /**
    * File 객체에서 모델 로드
+   * FileReader로 읽기 진행률 표시 → GLTFLoader.parse()로 파싱
    * @param {File} file - GLTF/GLB 파일
-   * @param {Function} onProgress - 진행 콜백
+   * @param {Function} onProgress - 진행 콜백 (percent: number)
    * @returns {Promise<{model: THREE.Group, bounds: THREE.Box3}>}
    */
   loadFromFile(file, onProgress) {
     return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(file);
+      const reader = new FileReader();
 
-      this.loader.load(
-        url,
-        (gltf) => {
-          URL.revokeObjectURL(url);
-          const result = this._processModel(gltf.scene, file.name);
-          resolve(result);
-        },
-        (progress) => {
-          if (onProgress && progress.total > 0) {
-            const percent = (progress.loaded / progress.total * 100).toFixed(1);
-            onProgress(percent);
-          }
-        },
-        (error) => {
-          URL.revokeObjectURL(url);
-          reject(error);
+      reader.onprogress = (e) => {
+        if (onProgress && e.lengthComputable && e.total > 0) {
+          // 읽기 = 0~50%, 파싱 = 50~100%
+          const percent = Math.round((e.loaded / e.total) * 50);
+          onProgress(percent);
         }
-      );
+      };
+
+      reader.onload = () => {
+        if (onProgress) onProgress(50);
+
+        this.loader.parse(
+          reader.result,
+          '',
+          (gltf) => {
+            if (onProgress) onProgress(90);
+            const result = this._processModel(gltf.scene, file.name);
+            if (onProgress) onProgress(100);
+            resolve(result);
+          },
+          (error) => {
+            reject(error);
+          }
+        );
+      };
+
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
     });
   }
 
