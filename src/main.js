@@ -29,6 +29,7 @@ let annotationManager = null;
 let activeTool = null; // 현재 활성 측정/어노테이션 도구
 let lastMeasurementCount = 0; // 측정 리스트 갱신 체크용
 let glbOptimizer = null;
+let autoDetectedScale = 1; // 자동 감지된 스케일 (단위 수동 변경 시 복원용)
 
 // ============================================================
 // Initialization
@@ -82,6 +83,10 @@ function init() {
 // Model Loading
 // ============================================================
 function onModelLoaded(result) {
+  // 이전 모델의 측정/섹션/어노테이션/도구 상태 초기화
+  resetAll();
+
+  autoDetectedScale = result.metricsScale;
   measurementManager.setMetricsScale(result.metricsScale);
   sectionPlaneManager.setModelBounds(result.bounds);
 
@@ -89,6 +94,14 @@ function onModelLoaded(result) {
   const unitInfo = result.metricsUnit || 'mm';
   document.getElementById('model-info').textContent = `${fileName} | ${unitInfo}`;
   updateStatus(`Model loaded: ${fileName}`);
+
+  // 단위 선택 UI 초기화
+  const unitSelect = document.getElementById('unit-select');
+  const unitInfoEl = document.getElementById('unit-info');
+  if (unitSelect) {
+    unitSelect.value = 'auto';
+    if (unitInfoEl) unitInfoEl.textContent = `자동: ${unitInfo}`;
+  }
 
   hideLoading();
 
@@ -115,6 +128,8 @@ function checkURLModel() {
   const params = new URLSearchParams(window.location.search);
   const modelUrl = params.get('model');
   if (modelUrl) {
+    // iframe 임베드 모드: 상단 툴바 숨김
+    document.getElementById('toolbar')?.classList.add('hidden');
     loadModelFromURL(modelUrl);
   }
 }
@@ -663,6 +678,9 @@ function updateSectionPanelUI() {
 
     listEl.appendChild(div);
   });
+
+  // 섹션 아이템 추가/삭제 후 패널 위치 재조정 (레이아웃 반영 대기)
+  requestAnimationFrame(() => adjustPanelPositions());
 }
 
 // ============================================================
@@ -708,6 +726,46 @@ function setupSettingsPanel() {
     viewer.setExposure(1.0);
     viewer.setMaterialColor('#a6b3bf');
   });
+
+  // 단위 선택
+  const unitSelect = document.getElementById('unit-select');
+  const unitInfoEl = document.getElementById('unit-info');
+  if (unitSelect) {
+    unitSelect.addEventListener('change', (e) => {
+      const unitScaleMap = {
+        auto: autoDetectedScale,
+        mm: 1,
+        cm: 10,
+        m: 1000,
+        inch: 25.4,
+      };
+      const unitLabelMap = {
+        auto: '자동 감지됨',
+        mm: '1 단위 = 1mm',
+        cm: '1 단위 = 1cm (×10)',
+        m: '1 단위 = 1m (×1000)',
+        inch: '1 단위 = 1inch (×25.4)',
+      };
+
+      const selected = e.target.value;
+      const newScale = unitScaleMap[selected] ?? autoDetectedScale;
+
+      measurementManager.setMetricsScale(newScale);
+      measurementManager.refreshLabels();
+      updateMeasurementList();
+
+      if (unitInfoEl) unitInfoEl.textContent = unitLabelMap[selected] || '';
+
+      // 상태바 단위 정보 업데이트
+      const modelInfoEl = document.getElementById('model-info');
+      if (modelInfoEl) {
+        const currentText = modelInfoEl.textContent;
+        const baseName = currentText.split('|')[0].trim();
+        const unitDisplay = selected === 'auto' ? (viewer.modelLoader?.metricsUnit || 'mm') : selected;
+        modelInfoEl.textContent = `${baseName} | ${unitDisplay}`;
+      }
+    });
+  }
 }
 
 // ============================================================
@@ -781,14 +839,33 @@ async function takeSnapshot() {
 // ============================================================
 function togglePanel(panelId) {
   document.getElementById(panelId)?.classList.toggle('hidden');
+  adjustPanelPositions();
 }
 
 function showPanel(panelId) {
   document.getElementById(panelId)?.classList.remove('hidden');
+  adjustPanelPositions();
 }
 
 function hidePanel(panelId) {
   document.getElementById(panelId)?.classList.add('hidden');
+  adjustPanelPositions();
+}
+
+/** 섹션/측정 패널 겹침 방지 - 둘 다 보이면 측정 패널을 아래로 이동 */
+function adjustPanelPositions() {
+  const sectionPanel = document.getElementById('section-panel');
+  const measurePanel = document.getElementById('measurement-list-panel');
+  if (!measurePanel) return;
+
+  const sectionVisible = sectionPanel && !sectionPanel.classList.contains('hidden');
+
+  if (sectionVisible) {
+    const sectionRect = sectionPanel.getBoundingClientRect();
+    measurePanel.style.top = `${sectionRect.bottom + 8}px`;
+  } else {
+    measurePanel.style.top = '';
+  }
 }
 
 // ============================================================

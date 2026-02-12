@@ -1,10 +1,10 @@
 /**
  * CameraManager - 카메라 뷰, 프로젝션, 커스텀 Orbit/Pan/Zoom 관리
  *
- * xeokit viewer3d의 카메라 동작을 재현:
- * - 커스텀 Orbit: 트랙볼 자유 회전 (gimbalLock=false, 화면 기준 회전)
- * - Pan: 우클릭/중클릭/Shift+좌클릭 드래그 → 모델 크기 기반 커스텀 Pan
- * - Zoom: 휠 → 비율 기반 커스텀 줌 (모든 크기의 모델에서 일관된 동작)
+ * - Orbit: this.target 주위로 쿼터니언 자유 회전 (gimbalLock=false)
+ * - Pan: camera + target 함께 이동
+ * - Zoom: 로그 스케일 dolly
+ * - this.target: lookAt 대상 + orbit 중심 (fitAll/setCameraView에서 모델 중심으로 설정)
  */
 import * as THREE from 'three';
 
@@ -20,7 +20,7 @@ export class CameraManager {
     // Orthographic camera (projection 전환용)
     this.orthoCamera = null;
 
-    // 회전 중심 (OrbitControls.target 대체)
+    // orbit 중심 + lookAt 대상
     this.target = new THREE.Vector3();
 
     // 커스텀 인터랙션 상태
@@ -29,10 +29,6 @@ export class CameraManager {
     this._lastX = 0;
     this._lastY = 0;
     this._rotateSpeed = 0.005;
-
-    // Raycast 기반 동적 pivot
-    this._raycaster = new THREE.Raycaster();
-    this._modelGroup = null;  // setModelGroup()으로 설정
 
     // FastNav 콜백
     this.onNavigationStart = null;
@@ -49,8 +45,7 @@ export class CameraManager {
 
     canvas.addEventListener('mousedown', (e) => {
       if (e.button === 0 && !e.shiftKey) {
-        // 좌클릭: 회전 — 클릭 지점으로 pivot 갱신
-        this._updatePivotOnOrbitStart(e);
+        // 좌클릭: 회전
         this._isRotating = true;
       } else if (e.button === 2 || e.button === 1 || (e.button === 0 && e.shiftKey)) {
         // 우클릭/중클릭/Shift+좌클릭: Pan
@@ -110,10 +105,9 @@ export class CameraManager {
   // ───── Custom Orbit (트랙볼 자유 회전) ─────
 
   /**
-   * 화면 기준 자유 회전 (gimbalLock=false 방식)
-   * 화면 X축 드래그 → 카메라의 up 벡터 기준 회전
-   * 화면 Y축 드래그 → 카메라의 right 벡터 기준 회전
-   * 극점(pole) 잠금 없이 자유롭게 회전
+   * this.target 주위로 자유 회전 (gimbalLock=false)
+   * - 화면 X축 드래그 → 카메라 up 기준 수평 회전
+   * - 화면 Y축 드래그 → 카메라 right 기준 수직 회전
    */
   _rotateCamera(dx, dy) {
     const activeCamera = this.getActiveCamera();
@@ -121,7 +115,7 @@ export class CameraManager {
     const angleX = -dx * this._rotateSpeed;
     const angleY = -dy * this._rotateSpeed;
 
-    // eye → target 벡터
+    // target → camera 벡터
     const offset = new THREE.Vector3().subVectors(activeCamera.position, this.target);
 
     // 카메라 로컬 right 축 (화면 가로 방향)
@@ -138,7 +132,7 @@ export class CameraManager {
     const quatX = new THREE.Quaternion().setFromAxisAngle(activeCamera.up, angleX);
     offset.applyQuaternion(quatX);
 
-    // 카메라 위치 업데이트
+    // 카메라 위치 = target + 회전된 offset
     activeCamera.position.copy(this.target).add(offset);
     activeCamera.lookAt(this.target);
   }
@@ -254,56 +248,9 @@ export class CameraManager {
     }
   }
 
-  /** Raycast 대상 모델 그룹 설정 (동적 pivot용) */
+  /** Raycast 대상 모델 그룹 설정 */
   setModelGroup(group) {
     this._modelGroup = group;
-  }
-
-  /**
-   * 회전 시작 시 클릭 지점의 모델 표면을 pivot으로 설정 (xeokit 방식)
-   * - 모델 위 클릭: 표면 히트 포인트가 새 회전 중심
-   * - 빈 공간 클릭: 기존 target 유지 (Camera.look 폴백)
-   *
-   * 핵심: target 변경 시 카메라 위치도 같이 이동시켜서
-   * 화면상 보이는 모습은 전혀 변하지 않도록 함 (점프 방지)
-   */
-  _updatePivotOnOrbitStart(e) {
-    if (!this._modelGroup) return;
-
-    const canvas = this.renderer.domElement;
-    const rect = canvas.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
-      ((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1
-    );
-
-    const activeCamera = this.getActiveCamera();
-    this._raycaster.setFromCamera(mouse, activeCamera);
-
-    const intersects = this._raycaster.intersectObjects(
-      this._modelGroup.children, true
-    );
-
-    if (intersects.length > 0) {
-      const hitPoint = intersects[0].point;
-
-      // 현재 시선 방향 보존: 히트 포인트를 시선 축에 투영
-      // → 카메라 시선 위의 점을 새 target으로 설정하여 lookAt 점프 방지
-      const viewDir = new THREE.Vector3()
-        .subVectors(this.target, activeCamera.position)
-        .normalize();
-
-      // 히트 포인트를 시선 축에 투영: camera + viewDir * t
-      const camToHit = new THREE.Vector3().subVectors(hitPoint, activeCamera.position);
-      const t = camToHit.dot(viewDir);
-
-      if (t > 0) {
-        // 시선 축 위의 투영 점을 새 target으로 설정
-        const newTarget = activeCamera.position.clone().addScaledVector(viewDir, t);
-        this.target.copy(newTarget);
-      }
-    }
-    // else: 빈 공간 → 기존 this.target 유지
   }
 
   /** 초기 카메라 상태 저장 (Home 버튼용) */

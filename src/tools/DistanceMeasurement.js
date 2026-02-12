@@ -133,7 +133,6 @@ export class DistanceMeasurement {
     const intersects = this._raycaster.intersectObjects(this.meshList, false);
 
     if (intersects.length === 0) {
-      // 히트 없으면 surface point 반환
       return null;
     }
 
@@ -145,8 +144,8 @@ export class DistanceMeasurement {
     // 2단계: 히트된 mesh의 엣지 중 근처 것만 검색
     const meshEdges = this.edgeDataByMesh.get(hitMesh);
     if (!meshEdges || meshEdges.length === 0) {
-      // 엣지 없는 mesh면 표면 히트 포인트 반환
-      return hitPoint.clone();
+      // 엣지 없는 mesh → 스냅 불가
+      return null;
     }
 
     const searchRadius = Math.max(this.searchRadius3D, hitDepth * 0.03);
@@ -253,8 +252,8 @@ export class DistanceMeasurement {
       }
     }
 
-    // 엣지 근처에 없으면 표면 히트 포인트 반환
-    return closestPoint || hitPoint.clone();
+    // 엣지 근처에 없으면 스냅 불가
+    return closestPoint || null;
   }
 
   _distPointToSegment(px, py, x1, y1, x2, y2) {

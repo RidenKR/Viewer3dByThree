@@ -1082,6 +1082,33 @@ button:disabled {
   cursor: pointer;
 }
 
+/* Unit select dropdown */
+#unit-select {
+  width: 100%;
+  padding: 6px 10px;
+  background-color: #1e1e1e;
+  border: 1px solid #4d4d4d;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+#unit-select:hover { border-color: #6d6d6d; }
+#unit-select:focus { border-color: #0078d4; }
+
+#unit-select option {
+  background-color: #2d2d2d;
+  color: #e0e0e0;
+}
+
+.unit-info-text {
+  font-size: 11px;
+  color: #808080;
+  font-style: italic;
+}
+
 /* ───── Navigation Buttons ───── */
 .nav-buttons-section {
   display: flex;

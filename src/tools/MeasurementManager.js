@@ -69,6 +69,15 @@ export class MeasurementManager {
     this.metricsScale = scale;
   }
 
+  /** 모든 측정 라벨의 표시값을 현재 스케일로 재계산 */
+  refreshLabels() {
+    for (const m of this.measurements) {
+      if (m.label) {
+        m.label.textContent = this.formatValue(m.length);
+      }
+    }
+  }
+
   /**
    * 측정값 포맷
    * @param {number} value - raw 측정값
