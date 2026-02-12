@@ -44,11 +44,16 @@ export class DistanceMeasurement {
   activate() {
     if (this.active) return;
     this.active = true;
-    this._extractEdgeData();
-    this.viewer.renderer.domElement.style.cursor = 'crosshair';
-    this.viewer.renderer.domElement.addEventListener('mousemove', this._onMouseMove);
-    this.viewer.renderer.domElement.addEventListener('click', this._onClick);
-    window.addEventListener('keydown', this._onKeyDown);
+    return new Promise(resolve => {
+      requestAnimationFrame(() => setTimeout(() => {
+        this._extractEdgeData();
+        this.viewer.renderer.domElement.style.cursor = 'crosshair';
+        this.viewer.renderer.domElement.addEventListener('mousemove', this._onMouseMove);
+        this.viewer.renderer.domElement.addEventListener('click', this._onClick);
+        window.addEventListener('keydown', this._onKeyDown);
+        resolve();
+      }, 0));
+    });
   }
 
   deactivate() {

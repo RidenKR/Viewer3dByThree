@@ -28,26 +28,54 @@ export class ModelLoader {
    * @param {Function} onProgress - 진행 콜백
    * @returns {Promise<{model: THREE.Group, bounds: THREE.Box3}>}
    */
-  loadFromURL(url, onProgress) {
+  async loadFromURL(url, onProgress) {
+    // fetch + ReadableStream으로 다운로드 진행률을 세밀하게 추적
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
+
+    const contentLength = +response.headers.get('Content-Length') || 0;
+    let loaded = 0;
+    const chunks = [];
+
+    const reader = response.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.length;
+      if (onProgress) {
+        if (contentLength > 0) {
+          onProgress(Math.round((loaded / contentLength) * 80));
+        } else {
+          // Content-Length 없는 경우: 바이트 수를 전달 (음수로 구분)
+          onProgress(-loaded);
+        }
+      }
+    }
+
+    // 다운로드 완료 → 파싱 전 UI 업데이트 (페인트 보장)
+    if (onProgress) onProgress('parse');
+    await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+
+    // chunks → ArrayBuffer
+    const buffer = new Uint8Array(loaded);
+    let offset = 0;
+    for (const chunk of chunks) {
+      buffer.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    // GLTFLoader.parse() — 동기 블로킹
     return new Promise((resolve, reject) => {
-      this.loader.load(
-        url,
+      this.loader.parse(
+        buffer.buffer,
+        '',
         (gltf) => {
-          if (onProgress) onProgress(90);
           const result = this._processModel(gltf.scene, url.split('/').pop());
           if (onProgress) onProgress(100);
           resolve(result);
         },
-        (progress) => {
-          if (onProgress && progress.total > 0) {
-            // 다운로드 = 0~80%, 파싱 = 80~100%
-            const percent = Math.round((progress.loaded / progress.total) * 80);
-            onProgress(Math.min(percent, 80));
-          }
-        },
-        (error) => {
-          reject(error);
-        }
+        (error) => reject(error)
       );
     });
   }
@@ -59,38 +87,37 @@ export class ModelLoader {
    * @param {Function} onProgress - 진행 콜백 (percent: number)
    * @returns {Promise<{model: THREE.Group, bounds: THREE.Box3}>}
    */
-  loadFromFile(file, onProgress) {
-    return new Promise((resolve, reject) => {
+  async loadFromFile(file, onProgress) {
+    // FileReader를 Promise로 래핑
+    const arrayBuffer = await new Promise((resolve, reject) => {
       const reader = new FileReader();
-
       reader.onprogress = (e) => {
         if (onProgress && e.lengthComputable && e.total > 0) {
-          // 읽기 = 0~50%, 파싱 = 50~100%
-          const percent = Math.round((e.loaded / e.total) * 50);
+          const percent = Math.round((e.loaded / e.total) * 80);
           onProgress(percent);
         }
       };
-
-      reader.onload = () => {
-        if (onProgress) onProgress(50);
-
-        this.loader.parse(
-          reader.result,
-          '',
-          (gltf) => {
-            if (onProgress) onProgress(90);
-            const result = this._processModel(gltf.scene, file.name);
-            if (onProgress) onProgress(100);
-            resolve(result);
-          },
-          (error) => {
-            reject(error);
-          }
-        );
-      };
-
+      reader.onload = () => resolve(reader.result);
       reader.onerror = () => reject(reader.error);
       reader.readAsArrayBuffer(file);
+    });
+
+    // 읽기 완료 → 파싱 전 UI 업데이트 (페인트 보장)
+    if (onProgress) onProgress('parse');
+    await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+
+    // GLTFLoader.parse() — 동기 블로킹
+    return new Promise((resolve, reject) => {
+      this.loader.parse(
+        arrayBuffer,
+        '',
+        (gltf) => {
+          const result = this._processModel(gltf.scene, file.name);
+          if (onProgress) onProgress(100);
+          resolve(result);
+        },
+        (error) => reject(error)
+      );
     });
   }
 

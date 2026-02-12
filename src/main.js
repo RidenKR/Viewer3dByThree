@@ -134,14 +134,22 @@ function checkURLModel() {
   }
 }
 
+function formatBytes(bytes) {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 async function loadModelFromURL(url) {
   showLoading('Downloading...');
   try {
     await viewer.loadModelFromURL(url, (percent) => {
-      if (percent < 80) {
+      if (percent === 'parse') {
+        updateLoadingText('Processing model...');
+      } else if (percent < 0) {
+        // Content-Length 없는 경우: 음수 = 바이트 수
+        updateLoadingText(`Downloading... ${formatBytes(-percent)}`);
+      } else {
         updateLoadingText(`Downloading... ${percent}%`);
-      } else if (percent < 100) {
-        updateLoadingText(`Processing model... ${percent}%`);
       }
     });
   } catch (error) {
@@ -155,12 +163,10 @@ async function loadModelFromFile(file) {
   showLoading(`Reading ${file.name}...`);
   try {
     await viewer.loadModelFromFile(file, (percent) => {
-      if (percent < 50) {
-        updateLoadingText(`Reading file... ${percent}%`);
-      } else if (percent < 90) {
-        updateLoadingText(`Parsing model... ${percent}%`);
+      if (percent === 'parse') {
+        updateLoadingText('Processing model...');
       } else {
-        updateLoadingText(`Processing... ${percent}%`);
+        updateLoadingText(`Reading file... ${percent}%`);
       }
     });
   } catch (error) {
@@ -445,31 +451,30 @@ function closeAllDropdowns() {
 // ============================================================
 // Measurement Tools
 // ============================================================
-function activateMeasureTool(type) {
+async function activateMeasureTool(type) {
   deactivateAllTools();
 
-  switch (type) {
-    case 'distance':
-      distanceMeasurement.activate();
-      activeTool = 'distance';
-      updateStatus('Distance: Click first point');
-      break;
-    case 'edge':
-      edgeMeasurement.activate();
-      activeTool = 'edge';
-      updateStatus('Edge: Hover and click edge');
-      break;
-    case 'diameter3p':
-      diameterMeasurement.activate();
-      activeTool = 'diameter3p';
-      updateStatus('Diameter (3pt): Click 3 points on arc');
-      break;
-    case 'diameter2p':
-      diameter2Point.activate();
-      activeTool = 'diameter2p';
-      updateStatus('Diameter (2pt): Click 2 endpoints');
-      break;
-  }
+  const statusMap = {
+    distance: 'Distance: Click first point',
+    edge: 'Edge: Hover and click edge',
+    diameter3p: 'Diameter (3pt): Click 3 points on arc',
+    diameter2p: 'Diameter (2pt): Click 2 endpoints',
+  };
+  const toolMap = {
+    distance: distanceMeasurement,
+    edge: edgeMeasurement,
+    diameter3p: diameterMeasurement,
+    diameter2p: diameter2Point,
+  };
+
+  const tool = toolMap[type];
+  if (!tool) return;
+
+  showLoading('Preparing edges...');
+  activeTool = type;
+  await tool.activate();
+  hideLoading();
+  updateStatus(statusMap[type]);
 
   document.getElementById('btn-bottom-measure-menu')?.classList.add('btn-active');
   showPanel('measurement-list-panel');

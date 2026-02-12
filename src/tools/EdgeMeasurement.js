@@ -42,10 +42,16 @@ export class EdgeMeasurement {
   activate() {
     if (this.active) return;
     this.active = true;
-    this._extractEdgeData();
-    this.viewer.renderer.domElement.style.cursor = 'crosshair';
-    this.viewer.renderer.domElement.addEventListener('mousemove', this._onMouseMove);
-    this.viewer.renderer.domElement.addEventListener('click', this._onClick);
+    // rAF → setTimeout(0): 브라우저가 로딩 UI를 페인트한 후 엣지 추출 시작
+    return new Promise(resolve => {
+      requestAnimationFrame(() => setTimeout(() => {
+        this._extractEdgeData();
+        this.viewer.renderer.domElement.style.cursor = 'crosshair';
+        this.viewer.renderer.domElement.addEventListener('mousemove', this._onMouseMove);
+        this.viewer.renderer.domElement.addEventListener('click', this._onClick);
+        resolve();
+      }, 0));
+    });
   }
 
   deactivate() {
