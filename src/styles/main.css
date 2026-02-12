@@ -1029,6 +1029,50 @@ button:disabled {
   letter-spacing: 0.5px;
 }
 
+/* 배경색 프리셋 */
+.bg-preset-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bg-preset {
+  width: 28px;
+  height: 28px;
+  padding: 2px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.bg-preset:hover {
+  border-color: #888;
+}
+
+.bg-preset.active {
+  border-color: #0078d4;
+}
+
+.bg-swatch {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  border: 1px solid #555;
+}
+
+#bg-color-input {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #4d4d4d;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
 .color-picker-wrapper {
   display: flex;
   align-items: center;

@@ -697,6 +697,25 @@ function setupSettingsPanel() {
     document.getElementById('btn-bottom-settings')?.classList.remove('btn-active');
   });
 
+  // 배경색
+  const bgPresets = document.querySelectorAll('.bg-preset');
+  const bgColorInput = document.getElementById('bg-color-input');
+  bgPresets.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const color = btn.dataset.color;
+      viewer.setBackgroundColor(color);
+      if (bgColorInput) bgColorInput.value = color;
+      bgPresets.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  if (bgColorInput) {
+    bgColorInput.addEventListener('input', (e) => {
+      viewer.setBackgroundColor(e.target.value);
+      bgPresets.forEach(b => b.classList.remove('active'));
+    });
+  }
+
   // 표면 색상
   const colorInput = document.getElementById('material-color-input');
   const colorHex = document.getElementById('color-hex-value');
@@ -730,6 +749,11 @@ function setupSettingsPanel() {
     }
     viewer.setExposure(1.0);
     viewer.setMaterialColor('#a6b3bf');
+    // 배경색 복원
+    viewer.setBackgroundColor('#252525');
+    if (bgColorInput) bgColorInput.value = '#252525';
+    bgPresets.forEach(b => b.classList.remove('active'));
+    document.querySelector('.bg-preset[data-color="#252525"]')?.classList.add('active');
   });
 
   // 단위 선택

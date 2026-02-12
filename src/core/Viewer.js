@@ -294,6 +294,11 @@ export class Viewer {
     this.renderer.toneMappingExposure = exposure;
   }
 
+  /** 배경색 변경 */
+  setBackgroundColor(hexColor) {
+    this.scene.background = new THREE.Color(hexColor);
+  }
+
   // ───── Stats Display ─────
 
   /**
