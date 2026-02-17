@@ -23,9 +23,16 @@ export class CameraManager {
     // orbit 중심 + lookAt 대상
     this.target = new THREE.Vector3();
 
+    // 네비게이션 모드: 'orbit' | 'pan' | 'zoom' | 'zoomBox'
+    this.navMode = 'orbit';
+
     // 커스텀 인터랙션 상태
     this._isRotating = false;
     this._isPanning = false;
+    this._isZooming = false;
+    this._isBoxSelect = false;
+    this._boxStart = { x: 0, y: 0 };
+    this._boxOverlay = null;
     this._lastX = 0;
     this._lastY = 0;
     this._rotateSpeed = 0.005;
@@ -45,15 +52,30 @@ export class CameraManager {
 
     canvas.addEventListener('mousedown', (e) => {
       if (e.button === 0 && !e.shiftKey) {
-        // 좌클릭: 회전
-        this._isRotating = true;
+        // 좌클릭: navMode에 따라 분기
+        switch (this.navMode) {
+          case 'orbit':
+            this._isRotating = true;
+            break;
+          case 'pan':
+            this._isPanning = true;
+            break;
+          case 'zoom':
+            this._isZooming = true;
+            break;
+          case 'zoomBox':
+            this._isBoxSelect = true;
+            this._boxStart = { x: e.clientX, y: e.clientY };
+            this._createBoxOverlay(e.clientX, e.clientY);
+            break;
+        }
       } else if (e.button === 2 || e.button === 1 || (e.button === 0 && e.shiftKey)) {
-        // 우클릭/중클릭/Shift+좌클릭: Pan
+        // 우클릭/중클릭/Shift+좌클릭: Pan (모든 모드에서)
         this._isPanning = true;
       }
       this._lastX = e.clientX;
       this._lastY = e.clientY;
-      this._notifyNavStart();
+      if (!this._isBoxSelect) this._notifyNavStart();
       e.preventDefault();
     });
 
@@ -68,17 +90,28 @@ export class CameraManager {
       } else if (this._isPanning) {
         const activeCamera = this.getActiveCamera();
         this._panCamera(activeCamera, dx, dy);
+      } else if (this._isZooming) {
+        this._zoomCamera(dy * 3);
+        this._notifyNavStart();
+        this._notifyNavEnd();
+      } else if (this._isBoxSelect) {
+        this._updateBoxOverlay(e.clientX, e.clientY);
       }
     });
 
     const onMouseUp = (e) => {
       if (e.button === 0) {
+        if (this._isBoxSelect) {
+          this._finishBoxSelect(e.clientX, e.clientY);
+          this._isBoxSelect = false;
+        }
         this._isRotating = false;
+        this._isZooming = false;
       }
       if (e.button === 2 || e.button === 1 || e.button === 0) {
         this._isPanning = false;
       }
-      if (!this._isRotating && !this._isPanning) {
+      if (!this._isRotating && !this._isPanning && !this._isZooming && !this._isBoxSelect) {
         this._notifyNavEnd();
       }
     };
@@ -87,13 +120,18 @@ export class CameraManager {
     canvas.addEventListener('mouseleave', () => {
       this._isRotating = false;
       this._isPanning = false;
+      this._isZooming = false;
+      if (this._isBoxSelect) {
+        this._removeBoxOverlay();
+        this._isBoxSelect = false;
+      }
       this._notifyNavEnd();
     });
 
     // 우클릭 컨텍스트 메뉴 방지
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Zoom
+    // Zoom (휠 — 모든 모드에서 작동)
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       this._zoomCamera(e.deltaY);
@@ -210,6 +248,105 @@ export class CameraManager {
       this.orthoCamera.zoom *= zoomFactor;
       this.orthoCamera.updateProjectionMatrix();
     }
+  }
+
+  // ───── Zoom Box ─────
+
+  _createBoxOverlay(x, y) {
+    this._removeBoxOverlay();
+    const overlay = document.createElement('div');
+    overlay.className = 'zoom-box-overlay';
+    overlay.style.left = x + 'px';
+    overlay.style.top = y + 'px';
+    overlay.style.width = '0px';
+    overlay.style.height = '0px';
+    document.body.appendChild(overlay);
+    this._boxOverlay = overlay;
+  }
+
+  _updateBoxOverlay(x, y) {
+    if (!this._boxOverlay) return;
+    const sx = this._boxStart.x;
+    const sy = this._boxStart.y;
+    const left = Math.min(sx, x);
+    const top = Math.min(sy, y);
+    const width = Math.abs(x - sx);
+    const height = Math.abs(y - sy);
+    this._boxOverlay.style.left = left + 'px';
+    this._boxOverlay.style.top = top + 'px';
+    this._boxOverlay.style.width = width + 'px';
+    this._boxOverlay.style.height = height + 'px';
+  }
+
+  _removeBoxOverlay() {
+    if (this._boxOverlay) {
+      this._boxOverlay.remove();
+      this._boxOverlay = null;
+    }
+  }
+
+  _finishBoxSelect(ex, ey) {
+    this._removeBoxOverlay();
+    const sx = this._boxStart.x;
+    const sy = this._boxStart.y;
+
+    // 최소 크기 체크 (너무 작은 드래그 무시)
+    if (Math.abs(ex - sx) < 10 || Math.abs(ey - sy) < 10) return;
+
+    const canvas = this.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+
+    // 화면 좌표 → NDC (-1 ~ +1)
+    const toNDC = (px, py) => ({
+      x: ((px - rect.left) / rect.width) * 2 - 1,
+      y: -((py - rect.top) / rect.height) * 2 + 1,
+    });
+
+    const ndc1 = toNDC(sx, sy);
+    const ndc2 = toNDC(ex, ey);
+    const ndcCenter = {
+      x: (ndc1.x + ndc2.x) / 2,
+      y: (ndc1.y + ndc2.y) / 2,
+    };
+    const ndcWidth = Math.abs(ndc2.x - ndc1.x);
+    const ndcHeight = Math.abs(ndc2.y - ndc1.y);
+
+    const activeCamera = this.getActiveCamera();
+
+    // NDC 중심점을 월드 좌표로 변환 (카메라 평면에 target 거리 깊이)
+    const dist = activeCamera.position.distanceTo(this.target);
+    const centerNDC = new THREE.Vector3(ndcCenter.x, ndcCenter.y, 0.5);
+    centerNDC.unproject(activeCamera);
+
+    // 카메라→unproject 방향
+    const dir = centerNDC.sub(activeCamera.position).normalize();
+    const newTarget = new THREE.Vector3().copy(activeCamera.position).addScaledVector(dir, dist);
+
+    // 줌 비율: 선택 영역이 화면을 채우도록
+    const zoomRatio = Math.max(ndcWidth / 2, ndcHeight / 2);
+    const newDist = dist * zoomRatio;
+
+    // 최소 거리 제한
+    const minDist = this.modelSize * 0.001;
+    const finalDist = Math.max(newDist, minDist);
+
+    // 카메라 재배치
+    const viewDir = new THREE.Vector3().subVectors(newTarget, activeCamera.position).normalize();
+    activeCamera.position.copy(newTarget).addScaledVector(viewDir, -finalDist);
+    this.target.copy(newTarget);
+
+    // Ortho 줌
+    if (this.projection === 'orthographic' && this.orthoCamera) {
+      this.orthoCamera.zoom *= (dist / finalDist);
+      this.orthoCamera.updateProjectionMatrix();
+    }
+
+    // near plane 조정
+    activeCamera.near = finalDist * 0.001;
+    activeCamera.updateProjectionMatrix();
+
+    this._notifyNavStart();
+    this._notifyNavEnd();
   }
 
   // ───── Camera State ─────

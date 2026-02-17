@@ -342,6 +342,18 @@ function setupBottomToolbarEvents() {
     resetAll();
   });
 
+  // 네비게이션 모드 버튼 (라디오 방식)
+  const navButtons = document.querySelectorAll('.nav-group .icon-btn');
+  navButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.nav;
+      if (!mode) return;
+      viewer.cameraManager.navMode = mode;
+      navButtons.forEach(b => b.classList.remove('btn-active'));
+      btn.classList.add('btn-active');
+    });
+  });
+
   // Projection 토글
   const btnProjection = document.getElementById('btn-bottom-projection');
   if (btnProjection) {

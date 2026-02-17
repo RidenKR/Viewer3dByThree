@@ -1582,3 +1582,12 @@ button:disabled {
 .toast.toast-info { border-left-color: #2196f3; }
 .toast.toast-warn { border-left-color: #ff9800; }
 .toast.toast-error { border-left-color: #f44336; }
+
+/* 줌 박스 오버레이 */
+.zoom-box-overlay {
+  position: fixed;
+  border: 2px dashed #0078d4;
+  background-color: rgba(0, 120, 212, 0.1);
+  pointer-events: none;
+  z-index: 9999;
+}

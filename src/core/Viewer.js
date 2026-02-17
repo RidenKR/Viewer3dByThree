@@ -90,6 +90,9 @@ export class Viewer {
     // 환경맵 생성 (금속 재질 반사용)
     this.lightManager.createEnvironmentMap(this.renderer);
 
+    // 좌표축 헬퍼 (좌측 하단)
+    this._setupAxisHelper();
+
     // FastNav: 네비게이션 중 픽셀 비율 감소로 성능 향상
     this.cameraManager.onNavigationStart = () => {
       this.isNavigating = true;
@@ -428,6 +431,9 @@ export class Viewer {
     const activeCamera = this.cameraManager.getActiveCamera();
     this.renderer.render(this.scene, activeCamera);
 
+    // 좌표축 렌더
+    this._renderAxisHelper(activeCamera);
+
     // 렌더 정보 캡처 (render() 직후)
     const info = this.renderer.info;
     this._lastRenderInfo = {
@@ -466,6 +472,89 @@ export class Viewer {
 
     this.renderer.setSize(width, height);
     this.cameraManager.onResize(width, height);
+  }
+
+  // ───── Axis Helper ─────
+
+  _setupAxisHelper() {
+    this._axisScene = new THREE.Scene();
+    this._axisCamera = new THREE.OrthographicCamera(-1.8, 1.8, 1.8, -1.8, 0.1, 100);
+    this._axisSize = 100; // px
+
+    // 축 라인
+    const axisLen = 1.0;
+    const headLen = 0.2;
+    const headWidth = 0.08;
+
+    const xArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0),
+      axisLen, 0xff4444, headLen, headWidth
+    );
+    const yArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0),
+      axisLen, 0x44cc44, headLen, headWidth
+    );
+    const zArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0),
+      axisLen, 0x4488ff, headLen, headWidth
+    );
+    this._axisScene.add(xArrow, yArrow, zArrow);
+
+    // 축 라벨 (CSS2D 대신 스프라이트 사용)
+    const makeLabel = (text, color, pos) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.font = 'bold 48px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = color;
+      ctx.fillText(text, 32, 32);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const mat = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+      const sprite = new THREE.Sprite(mat);
+      sprite.position.copy(pos);
+      sprite.scale.set(0.4, 0.4, 1);
+      return sprite;
+    };
+
+    this._axisScene.add(
+      makeLabel('X', '#ff4444', new THREE.Vector3(1.4, 0, 0)),
+      makeLabel('Y', '#44cc44', new THREE.Vector3(0, 1.4, 0)),
+      makeLabel('Z', '#4488ff', new THREE.Vector3(0, 0, 1.4))
+    );
+  }
+
+  _renderAxisHelper(activeCamera) {
+    if (!this._axisScene) return;
+
+    const pixelRatio = this.renderer.getPixelRatio();
+    const size = this._axisSize * pixelRatio;
+
+    // 메인 카메라 회전만 반영 (위치 무시)
+    const q = activeCamera.quaternion;
+    this._axisCamera.position.set(0, 0, 4);
+    this._axisCamera.position.applyQuaternion(q);
+    this._axisCamera.quaternion.copy(q);
+
+    // 좌측 하단에 viewport 설정
+    const fullHeight = this.renderer.domElement.height;
+    this.renderer.setViewport(10 * pixelRatio, 10 * pixelRatio, size, size);
+    this.renderer.setScissor(10 * pixelRatio, 10 * pixelRatio, size, size);
+    this.renderer.setScissorTest(true);
+    this.renderer.autoClear = false;
+    this.renderer.clearDepth();
+
+    this.renderer.render(this._axisScene, this._axisCamera);
+
+    // 복원
+    this.renderer.setScissorTest(false);
+    this.renderer.autoClear = true;
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    this.renderer.setViewport(0, 0, w, h);
   }
 
   // ───── Event Registration ─────
