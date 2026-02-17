@@ -9,9 +9,10 @@
 import * as THREE from 'three';
 
 export class CameraManager {
-  constructor(camera, renderer) {
+  constructor(camera, renderer, scene) {
     this.camera = camera;
     this.renderer = renderer;
+    this.scene = scene;
     this.projection = 'perspective'; // 'perspective' | 'orthographic'
     this.initialState = null;
     this.modelBounds = null;
@@ -313,22 +314,54 @@ export class CameraManager {
 
     const activeCamera = this.getActiveCamera();
 
-    // NDC 중심점을 월드 좌표로 변환 (카메라 평면에 target 거리 깊이)
     const dist = activeCamera.position.distanceTo(this.target);
-    const centerNDC = new THREE.Vector3(ndcCenter.x, ndcCenter.y, 0.5);
-    centerNDC.unproject(activeCamera);
 
-    // 카메라→unproject 방향
-    const dir = centerNDC.sub(activeCamera.position).normalize();
-    const newTarget = new THREE.Vector3().copy(activeCamera.position).addScaledVector(dir, dist);
+    // 영역 중심 방향
+    const centerVec = new THREE.Vector3(ndcCenter.x, ndcCenter.y, 0.5);
+    centerVec.unproject(activeCamera);
+    const dir = centerVec.sub(activeCamera.position).normalize();
+
+    // 선택 영역 내 여러 지점에서 raycast (중심 + 4모서리 + 4변 중점 = 9발)
+    let closestDist = Infinity;
+    if (this.scene) {
+      const raycaster = new THREE.Raycaster();
+      const samplePoints = [
+        { x: ndcCenter.x, y: ndcCenter.y }, // 중심
+        { x: ndc1.x, y: ndc1.y },           // 모서리 4개
+        { x: ndc2.x, y: ndc1.y },
+        { x: ndc1.x, y: ndc2.y },
+        { x: ndc2.x, y: ndc2.y },
+        { x: ndcCenter.x, y: ndc1.y },      // 변 중점 4개
+        { x: ndcCenter.x, y: ndc2.y },
+        { x: ndc1.x, y: ndcCenter.y },
+        { x: ndc2.x, y: ndcCenter.y },
+      ];
+
+      for (const pt of samplePoints) {
+        const ptVec = new THREE.Vector3(pt.x, pt.y, 0.5);
+        ptVec.unproject(activeCamera);
+        const ptDir = ptVec.sub(activeCamera.position).normalize();
+        raycaster.set(activeCamera.position, ptDir);
+        const hits = raycaster.intersectObjects(this.scene.children, true)
+          .filter(h => h.object.isMesh);
+        if (hits.length > 0 && hits[0].distance < closestDist) {
+          closestDist = hits[0].distance;
+        }
+      }
+    }
+
+    // 표면 히트가 있으면 해당 깊이 사용, 없으면 기존 target 거리
+    const surfaceDist = closestDist < Infinity ? closestDist : dist;
+    const newTarget = new THREE.Vector3().copy(activeCamera.position).addScaledVector(dir, surfaceDist);
 
     // 줌 비율: 선택 영역이 화면을 채우도록
     const zoomRatio = Math.max(ndcWidth / 2, ndcHeight / 2);
-    const newDist = dist * zoomRatio;
+    const newDist = surfaceDist * zoomRatio;
 
-    // 최소 거리 제한
-    const minDist = this.modelSize * 0.001;
-    const finalDist = Math.max(newDist, minDist);
+    // 표면 앞으로 뚫고 들어가지 않도록 최소 거리 제한
+    const surfaceMinDist = surfaceDist * 0.1; // 표면 거리의 10%
+    const absoluteMinDist = this.modelSize * 0.002;
+    const finalDist = Math.max(newDist, surfaceMinDist, absoluteMinDist);
 
     // 카메라 재배치
     const viewDir = new THREE.Vector3().subVectors(newTarget, activeCamera.position).normalize();

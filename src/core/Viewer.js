@@ -83,7 +83,7 @@ export class Viewer {
     this.container.appendChild(this.renderer.domElement);
 
     // Managers
-    this.cameraManager = new CameraManager(this.camera, this.renderer);
+    this.cameraManager = new CameraManager(this.camera, this.renderer, this.scene);
     this.lightManager = new LightManager(this.scene);
     this.modelLoader = new ModelLoader(this.scene);
 
