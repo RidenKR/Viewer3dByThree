@@ -78,6 +78,21 @@ export class EdgeMeasurement {
     const model = this.viewer.modelLoader.model;
     if (!model) return;
 
+    // 총 정점 수 체크 — 너무 큰 모델은 EdgesGeometry가 브라우저를 멈추게 함
+    const MAX_VERTICES = 5_000_000;
+    let totalVertices = 0;
+    model.traverse((child) => {
+      if (child.isMesh && child.geometry) {
+        totalVertices += child.geometry.attributes.position.count;
+      }
+    });
+    if (totalVertices > MAX_VERTICES) {
+      console.warn(`[EdgeMeasurement] Model too large for edge extraction (${(totalVertices / 1e6).toFixed(1)}M vertices, limit: ${MAX_VERTICES / 1e6}M). Edge snapping disabled.`);
+      this.tooLargeForEdges = true;
+      return;
+    }
+    this.tooLargeForEdges = false;
+
     let totalMeshes = 0, totalEdges = 0;
     model.traverse((child) => {
       if (child.isMesh && child.geometry) {

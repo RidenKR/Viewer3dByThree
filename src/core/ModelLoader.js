@@ -210,9 +210,9 @@ export class ModelLoader {
    * 렌더링 최적화를 위한 기하 병합
    * @param {Function} onProgress - 진행 콜백
    */
-  async mergeForRendering(onProgress) {
+  async mergeForRendering(onProgress, signal) {
     if (!this.model) return;
-    await this.geometryMerger.mergeModel(this.model, onProgress);
+    await this.geometryMerger.mergeModel(this.model, onProgress, signal);
   }
 
   // ───── Edge Management ─────
@@ -223,11 +223,11 @@ export class ModelLoader {
    * @param {number} thresholdAngle - Edge threshold (degrees)
    * @returns {Promise<THREE.LineSegments[]>}
    */
-  async createEdges(thresholdAngle = 80) {
+  async createEdges(thresholdAngle = 80, signal) {
     this.clearEdges();
     if (!this.model) return [];
 
-    const mergedEdge = await this.geometryMerger.createMergedEdges(this.model, thresholdAngle);
+    const mergedEdge = await this.geometryMerger.createMergedEdges(this.model, thresholdAngle, signal);
     if (mergedEdge) {
       this.edgeLines = [mergedEdge];
     }

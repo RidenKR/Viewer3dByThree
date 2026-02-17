@@ -68,6 +68,21 @@ export class Diameter2Point {
     const model = this.viewer.modelLoader.model;
     if (!model) return;
 
+    // 총 정점 수 체크
+    const MAX_VERTICES = 5_000_000;
+    let totalVertices = 0;
+    model.traverse((child) => {
+      if (child.isMesh && child.geometry) {
+        totalVertices += child.geometry.attributes.position.count;
+      }
+    });
+    if (totalVertices > MAX_VERTICES) {
+      console.warn(`[Diameter2Point] Model too large for edge extraction (${(totalVertices / 1e6).toFixed(1)}M vertices). Edge snapping disabled.`);
+      this.tooLargeForEdges = true;
+      return;
+    }
+    this.tooLargeForEdges = false;
+
     model.traverse((child) => {
       if (child.isMesh && child.geometry) {
         const edgesGeom = new THREE.EdgesGeometry(child.geometry, 80);

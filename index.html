@@ -283,54 +283,108 @@
       <button id="settings-close">&times;</button>
     </div>
     <div class="settings-body">
-      <div class="setting-group-title">배경</div>
-      <div class="setting-item">
-        <label>배경색</label>
-        <div class="bg-preset-buttons">
-          <button class="bg-preset active" data-color="#252525" title="Dark (기본)">
-            <span class="bg-swatch" style="background:#252525"></span>
-          </button>
-          <button class="bg-preset" data-color="#3c3c3c" title="Gray">
-            <span class="bg-swatch" style="background:#3c3c3c"></span>
-          </button>
-          <button class="bg-preset" data-color="#97bced" title="Sky">
-            <span class="bg-swatch" style="background:#97bced"></span>
-          </button>
-          <button class="bg-preset" data-color="#ffffff" title="White">
-            <span class="bg-swatch" style="background:#ffffff"></span>
-          </button>
-          <input type="color" id="bg-color-input" value="#252525" title="커스텀 색상">
+      <!-- 배경 섹션 -->
+      <div class="setting-accordion open">
+        <div class="setting-accordion-header">배경</div>
+        <div class="setting-accordion-body">
+          <div class="setting-item">
+            <label>배경색</label>
+            <div class="bg-preset-buttons">
+              <button class="bg-preset active" data-color="#252525" title="Dark (기본)">
+                <span class="bg-swatch" style="background:#252525"></span>
+              </button>
+              <button class="bg-preset" data-color="#3c3c3c" title="Gray">
+                <span class="bg-swatch" style="background:#3c3c3c"></span>
+              </button>
+              <button class="bg-preset" data-color="#97bced" title="Sky">
+                <span class="bg-swatch" style="background:#97bced"></span>
+              </button>
+              <button class="bg-preset" data-color="#ffffff" title="White">
+                <span class="bg-swatch" style="background:#ffffff"></span>
+              </button>
+              <input type="color" id="bg-color-input" value="#252525" title="커스텀 색상">
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="setting-group-title">뷰어 재질 및 조명</div>
-      <div class="setting-item">
-        <label>표면 색상</label>
-        <div class="color-picker-wrapper">
-          <input type="color" id="material-color-input" value="#a6b3bf">
-          <span id="color-hex-value">#a6b3bf</span>
+      <!-- 조명 섹션 -->
+      <div class="setting-accordion">
+        <div class="setting-accordion-header">조명</div>
+        <div class="setting-accordion-body">
+          <div class="setting-item">
+            <label>모델 밝기</label>
+            <input type="range" id="gamma-slider" min="0.1" max="3.0" step="0.1" value="1.0">
+            <span id="gamma-value">1.0</span>
+          </div>
+          <div class="setting-item">
+            <label>주변광 강도</label>
+            <input type="range" id="ambient-slider" min="0" max="2.0" step="0.1" value="1.0">
+            <span id="ambient-value">1.0</span>
+          </div>
+          <div class="setting-item">
+            <label>직접광 강도</label>
+            <input type="range" id="directional-slider" min="0" max="3.0" step="0.1" value="1.0">
+            <span id="directional-value">1.0</span>
+          </div>
+          <div class="setting-item">
+            <label class="setting-checkbox-label">
+              <input type="checkbox" id="envmap-toggle" checked>
+              환경맵 (IBL)
+            </label>
+          </div>
+          <div class="setting-item" id="envmap-slider-group">
+            <label>환경광 반사</label>
+            <input type="range" id="envmap-slider" min="0" max="2.0" step="0.1" value="1.0">
+            <span id="envmap-value">1.0</span>
+          </div>
         </div>
       </div>
-      <div class="setting-item">
-        <label>모델 밝기</label>
-        <input type="range" id="gamma-slider" min="0.1" max="3.0" step="0.1" value="1.0">
-        <span id="gamma-value">1.0</span>
+
+      <!-- 재질 섹션 -->
+      <div class="setting-accordion">
+        <div class="setting-accordion-header">재질</div>
+        <div class="setting-accordion-body">
+          <div class="setting-item">
+            <label>표면 색상</label>
+            <div class="color-picker-wrapper">
+              <input type="color" id="material-color-input" value="#a6b3bf">
+              <span id="color-hex-value">#a6b3bf</span>
+            </div>
+          </div>
+          <div class="setting-item">
+            <label>금속성 (Metalness)</label>
+            <input type="range" id="metalness-slider" min="0" max="1.0" step="0.05" value="0.5">
+            <span id="metalness-value">0.50</span>
+          </div>
+          <div class="setting-item">
+            <label>거칠기 (Roughness)</label>
+            <input type="range" id="roughness-slider" min="0" max="1.0" step="0.05" value="0.5">
+            <span id="roughness-value">0.50</span>
+          </div>
+        </div>
       </div>
+
+      <!-- 측정 단위 섹션 -->
+      <div class="setting-accordion open">
+        <div class="setting-accordion-header">측정 단위</div>
+        <div class="setting-accordion-body">
+          <div class="setting-item">
+            <label>모델 단위</label>
+            <select id="unit-select">
+              <option value="auto" selected>자동 감지</option>
+              <option value="mm">mm (밀리미터)</option>
+              <option value="cm">cm (센티미터)</option>
+              <option value="m">m (미터)</option>
+              <option value="inch">inch (인치)</option>
+            </select>
+            <span id="unit-info" class="unit-info-text">자동 감지됨</span>
+          </div>
+        </div>
+      </div>
+
       <div class="setting-actions">
         <button id="btn-material-reset">기본값 복원</button>
-      </div>
-
-      <div class="setting-group-title">측정 단위</div>
-      <div class="setting-item">
-        <label>모델 단위</label>
-        <select id="unit-select">
-          <option value="auto" selected>자동 감지</option>
-          <option value="mm">mm (밀리미터)</option>
-          <option value="cm">cm (센티미터)</option>
-          <option value="m">m (미터)</option>
-          <option value="inch">inch (인치)</option>
-        </select>
-        <span id="unit-info" class="unit-info-text">자동 감지됨</span>
       </div>
     </div>
   </div>

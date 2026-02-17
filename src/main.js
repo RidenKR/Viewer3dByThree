@@ -82,6 +82,10 @@ function init() {
 // ============================================================
 // Model Loading
 // ============================================================
+// 대형 모델 판별 임계값 (이 이상이면 엣지/와이어프레임 비활성)
+const LARGE_MODEL_VERTEX_LIMIT = 5_000_000;
+let isLargeModel = false;
+
 function onModelLoaded(result) {
   // 이전 모델의 측정/섹션/어노테이션/도구 상태 초기화
   resetAll();
@@ -101,6 +105,23 @@ function onModelLoaded(result) {
   if (unitSelect) {
     unitSelect.value = 'auto';
     if (unitInfoEl) unitInfoEl.textContent = `자동: ${unitInfo}`;
+  }
+
+  // 대형 모델 판별
+  let totalVertices = 0;
+  result.model.traverse((child) => {
+    if (child.isMesh && child.geometry) {
+      totalVertices += child.geometry.attributes.position.count;
+    }
+  });
+  isLargeModel = totalVertices > LARGE_MODEL_VERTEX_LIMIT;
+
+  if (isLargeModel) {
+    const vertexStr = (totalVertices / 1e6).toFixed(1);
+    showToast(
+      `대형 모델 (${vertexStr}M 정점): 와이어프레임 보기 및 측정 기능이 비활성화됩니다.`,
+      'warn', 5000
+    );
   }
 
   hideLoading();
@@ -368,6 +389,11 @@ function setupDropdowns() {
   setupDropdown('btn-bottom-view-mode', 'view-mode-dropdown', (option) => {
     const mode = option.dataset.mode;
     if (mode) {
+      // 대형 모델에서 wireframe 계열 차단
+      if (isLargeModel && (mode === 'wireframe' || mode === 'shaded-wireframe')) {
+        showToast('대형 모델에서는 와이어프레임 모드를 사용할 수 없습니다.', 'warn', 3000);
+        return;
+      }
       viewer.setViewMode(mode);
       updateStatus(`View Mode: ${mode}`);
     }
@@ -470,10 +496,17 @@ async function activateMeasureTool(type) {
   const tool = toolMap[type];
   if (!tool) return;
 
+  // 대형 모델에서 측정 기능 완전 차단
+  if (isLargeModel) {
+    showToast('대형 모델에서는 측정 기능을 사용할 수 없습니다.', 'warn', 3000);
+    return;
+  }
+
   showLoading('Preparing edges...');
   activeTool = type;
   await tool.activate();
   hideLoading();
+
   updateStatus(statusMap[type]);
 
   document.getElementById('btn-bottom-measure-menu')?.classList.add('btn-active');
@@ -521,8 +554,8 @@ function resetAll() {
     document.getElementById('btn-bottom-projection')?.classList.remove('btn-active');
   }
 
-  // 6. 뷰 모드를 shaded-wireframe으로 리셋
-  viewer.setViewMode('shaded-wireframe');
+  // 6. 뷰 모드 리셋 (대형 모델은 shaded, 일반 모델은 shaded-wireframe)
+  viewer.setViewMode(isLargeModel ? 'shaded' : 'shaded-wireframe');
 
   // 7. 카메라를 초기 상태로 복원
   viewer.cameraManager.restoreInitialState();
@@ -697,6 +730,13 @@ function setupSettingsPanel() {
     document.getElementById('btn-bottom-settings')?.classList.remove('btn-active');
   });
 
+  // 아코디언 토글
+  document.querySelectorAll('.setting-accordion-header').forEach(header => {
+    header.addEventListener('click', () => {
+      header.parentElement.classList.toggle('open');
+    });
+  });
+
   // 배경색
   const bgPresets = document.querySelectorAll('.bg-preset');
   const bgColorInput = document.getElementById('bg-color-input');
@@ -737,6 +777,74 @@ function setupSettingsPanel() {
     });
   }
 
+  // 주변광 강도
+  const ambientSlider = document.getElementById('ambient-slider');
+  const ambientValue = document.getElementById('ambient-value');
+  if (ambientSlider) {
+    ambientSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      viewer.setAmbientIntensity(val);
+      if (ambientValue) ambientValue.textContent = val.toFixed(1);
+    });
+  }
+
+  // 직접광 강도
+  const directionalSlider = document.getElementById('directional-slider');
+  const directionalValue = document.getElementById('directional-value');
+  if (directionalSlider) {
+    directionalSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      viewer.setDirectionalIntensity(val);
+      if (directionalValue) directionalValue.textContent = val.toFixed(1);
+    });
+  }
+
+  // 환경맵 토글
+  const envmapToggle = document.getElementById('envmap-toggle');
+  const envmapSliderGroup = document.getElementById('envmap-slider-group');
+  if (envmapToggle) {
+    envmapToggle.addEventListener('change', (e) => {
+      viewer.setEnvMapEnabled(e.target.checked);
+      if (envmapSliderGroup) {
+        envmapSliderGroup.style.opacity = e.target.checked ? '1' : '0.4';
+        envmapSliderGroup.style.pointerEvents = e.target.checked ? 'auto' : 'none';
+      }
+    });
+  }
+
+  // 환경광 반사
+  const envmapSlider = document.getElementById('envmap-slider');
+  const envmapValue = document.getElementById('envmap-value');
+  if (envmapSlider) {
+    envmapSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      viewer.setEnvMapIntensity(val);
+      if (envmapValue) envmapValue.textContent = val.toFixed(1);
+    });
+  }
+
+  // 금속성 (Metalness)
+  const metalnessSlider = document.getElementById('metalness-slider');
+  const metalnessValue = document.getElementById('metalness-value');
+  if (metalnessSlider) {
+    metalnessSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      viewer.setMaterialProperties(val, null);
+      if (metalnessValue) metalnessValue.textContent = val.toFixed(2);
+    });
+  }
+
+  // 거칠기 (Roughness)
+  const roughnessSlider = document.getElementById('roughness-slider');
+  const roughnessValue = document.getElementById('roughness-value');
+  if (roughnessSlider) {
+    roughnessSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      viewer.setMaterialProperties(null, val);
+      if (roughnessValue) roughnessValue.textContent = val.toFixed(2);
+    });
+  }
+
   // 기본값 복원
   document.getElementById('btn-material-reset')?.addEventListener('click', () => {
     if (colorInput) {
@@ -747,8 +855,39 @@ function setupSettingsPanel() {
       gammaSlider.value = '1.0';
       if (gammaValue) gammaValue.textContent = '1.0';
     }
+    if (ambientSlider) {
+      ambientSlider.value = '1.0';
+      if (ambientValue) ambientValue.textContent = '1.0';
+    }
+    if (directionalSlider) {
+      directionalSlider.value = '1.0';
+      if (directionalValue) directionalValue.textContent = '1.0';
+    }
+    if (envmapToggle) {
+      envmapToggle.checked = true;
+      if (envmapSliderGroup) {
+        envmapSliderGroup.style.opacity = '1';
+        envmapSliderGroup.style.pointerEvents = 'auto';
+      }
+    }
+    if (envmapSlider) {
+      envmapSlider.value = '1.0';
+      if (envmapValue) envmapValue.textContent = '1.0';
+    }
+    if (metalnessSlider) {
+      metalnessSlider.value = '0.50';
+      if (metalnessValue) metalnessValue.textContent = '0.50';
+    }
+    if (roughnessSlider) {
+      roughnessSlider.value = '0.50';
+      if (roughnessValue) roughnessValue.textContent = '0.50';
+    }
     viewer.setExposure(1.0);
-    viewer.setMaterialColor('#a6b3bf');
+    viewer.setAmbientIntensity(1.0);
+    viewer.setDirectionalIntensity(1.0);
+    viewer.setEnvMapEnabled(true);
+    viewer.setEnvMapIntensity(1.0);
+    viewer.setMaterialProperties(0.5, 0.5);
     // 배경색 복원
     viewer.setBackgroundColor('#252525');
     if (bgColorInput) bgColorInput.value = '#252525';
@@ -903,6 +1042,30 @@ function adjustPanelPositions() {
 function updateStatus(text) {
   const el = document.getElementById('status-text');
   if (el) el.textContent = text;
+}
+
+/** Toast 알림 표시 */
+function showToast(message, type = 'warn', duration = 4000) {
+  let toast = document.getElementById('viewer-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'viewer-toast';
+    toast.className = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.className = `toast toast-${type}`;
+
+  // 표시
+  requestAnimationFrame(() => {
+    toast.classList.add('toast-show');
+  });
+
+  // 자동 숨김
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => {
+    toast.classList.remove('toast-show');
+  }, duration);
 }
 
 function showLoading(text) {

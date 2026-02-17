@@ -30,7 +30,7 @@ export class GeometryMerger {
   /**
    * 모델의 메시를 머티리얼별로 병합
    */
-  async mergeModel(model, onProgress) {
+  async mergeModel(model, onProgress, signal) {
     this.dispose();
 
     let meshCount = 0;
@@ -48,6 +48,8 @@ export class GeometryMerger {
     const total = groups.size;
 
     for (const [key, { material, meshes }] of groups) {
+      if (signal?.aborted) { this.dispose(); return; }
+
       this.originalMeshCount += meshes.length;
 
       if (meshes.length === 1) {
@@ -56,7 +58,9 @@ export class GeometryMerger {
         continue;
       }
 
-      const merged = await this._fastMerge(meshes);
+      const merged = await this._fastMerge(meshes, signal);
+
+      if (signal?.aborted) { this.dispose(); return; }
 
       if (merged) {
         const clonedMat = material.clone();
@@ -88,8 +92,21 @@ export class GeometryMerger {
   /**
    * 모든 엣지를 단일 LineSegments로 병합 (비동기)
    */
-  async createMergedEdges(model, thresholdAngle = 80) {
+  async createMergedEdges(model, thresholdAngle = 80, signal) {
     this.disposeMergedEdges();
+
+    // 총 정점 수 체크 — 너무 큰 모델은 EdgesGeometry가 브라우저를 멈추게 함
+    const MAX_VERTICES = 5_000_000;
+    let totalVertices = 0;
+    model.traverse((child) => {
+      if (child.isMesh && child.geometry) {
+        totalVertices += child.geometry.attributes.position.count;
+      }
+    });
+    if (totalVertices > MAX_VERTICES) {
+      console.warn(`[GeometryMerger] Model too large for edge creation (${(totalVertices / 1e6).toFixed(1)}M vertices, limit: ${MAX_VERTICES / 1e6}M). Skipping edges.`);
+      return null;
+    }
 
     // 1단계: 전체 엣지 포지션 수를 미리 계산 → 한번에 Float32Array 할당
     const meshes = [];
@@ -102,6 +119,8 @@ export class GeometryMerger {
     let totalFloats = 0;
 
     for (let i = 0; i < meshes.length; i++) {
+      if (signal?.aborted) return null;
+
       const child = meshes[i];
       const edgesGeom = new THREE.EdgesGeometry(child.geometry, thresholdAngle);
       const pos = edgesGeom.attributes.position.array;
@@ -118,6 +137,7 @@ export class GeometryMerger {
       }
     }
 
+    if (signal?.aborted) return null;
     if (totalFloats === 0) return null;
 
     // 2단계: 단일 buffer에 변환하며 복사
@@ -136,8 +156,11 @@ export class GeometryMerger {
 
       if ((a + 1) % YIELD_INTERVAL === 0) {
         await new Promise(r => setTimeout(r, 0));
+        if (signal?.aborted) return null;
       }
     }
+
+    if (signal?.aborted) return null;
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(merged, 3));
@@ -248,7 +271,7 @@ export class GeometryMerger {
    * - THREE.Vector3 객체 사용 없음
    * - 행렬 원소를 직접 꺼내서 inline 곱셈 (메서드 호출 오버헤드 제거)
    */
-  async _fastMerge(meshes) {
+  async _fastMerge(meshes, signal) {
     // 1단계: 전체 크기 계산
     let totalVertices = 0;
     let totalIndices = 0;
@@ -332,6 +355,7 @@ export class GeometryMerger {
       // yield (500개 메시마다 — inline 곱셈이 빠르므로 간격 늘림)
       if ((m + 1) % 500 === 0) {
         await new Promise(r => setTimeout(r, 0));
+        if (signal?.aborted) return null;
       }
     }
 

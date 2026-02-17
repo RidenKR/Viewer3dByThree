@@ -32,6 +32,7 @@ export class Viewer {
     this.animationId = null;
     this.isNavigating = false;
     this.isMerging = false; // 백그라운드 병합 진행 중
+    this._mergeAbortController = null; // 병합 취소 컨트롤러
 
     // FastNav
     this.basePixelRatio = window.devicePixelRatio;
@@ -86,6 +87,9 @@ export class Viewer {
     this.lightManager = new LightManager(this.scene);
     this.modelLoader = new ModelLoader(this.scene);
 
+    // 환경맵 생성 (금속 재질 반사용)
+    this.lightManager.createEnvironmentMap(this.renderer);
+
     // FastNav: 네비게이션 중 픽셀 비율 감소로 성능 향상
     this.cameraManager.onNavigationStart = () => {
       this.isNavigating = true;
@@ -111,6 +115,8 @@ export class Viewer {
    * @param {Function} onProgress - 진행 콜백
    */
   async loadModelFromURL(url, onProgress) {
+    // 진행 중인 백그라운드 병합 취소
+    this._abortBackgroundMerge();
     const result = await this.modelLoader.loadFromURL(url, onProgress);
     await this._onModelLoadComplete(result);
     return result;
@@ -122,6 +128,8 @@ export class Viewer {
    * @param {Function} onProgress - 진행 콜백
    */
   async loadModelFromFile(file, onProgress) {
+    // 진행 중인 백그라운드 병합 취소
+    this._abortBackgroundMerge();
     const result = await this.modelLoader.loadFromFile(file, onProgress);
     await this._onModelLoadComplete(result);
     return result;
@@ -141,6 +149,10 @@ export class Viewer {
     const maxDim = Math.max(size.x, size.y, size.z);
     this.lightManager.adjustForModel(maxDim);
 
+    // 백그라운드 병합 예정 플래그 설정
+    // (콜백에서 setViewMode → createEdges 중복 호출 방지)
+    this.isMerging = true;
+
     // 콜백 호출 → 모델을 먼저 화면에 보여줌 (원본 메시, draw call 높지만 즉시 표시)
     this._onModelLoaded.forEach(cb => cb(result));
 
@@ -148,11 +160,23 @@ export class Viewer {
     this._mergeInBackground();
   }
 
-  /**
-   * 백그라운드 기하 병합 + 엣지 생성
-   * 모델은 이미 화면에 표시된 상태에서 비동기로 최적화 수행
-   */
+  /** 진행 중인 백그라운드 병합 취소 */
+  _abortBackgroundMerge() {
+    if (this._mergeAbortController) {
+      this._mergeAbortController.abort();
+      this._mergeAbortController = null;
+      this.isMerging = false;
+      this._onMergeProgress?.(null);
+    }
+  }
+
   async _mergeInBackground() {
+    // 이전 병합 취소
+    this._abortBackgroundMerge();
+    const abortController = new AbortController();
+    this._mergeAbortController = abortController;
+    const signal = abortController.signal;
+
     this.isMerging = true;
     this._onMergeProgress?.('Optimizing...');
 
@@ -162,7 +186,10 @@ export class Viewer {
       await this.modelLoader.mergeForRendering((progress) => {
         const pct = (progress * 100).toFixed(0);
         this._onMergeProgress?.(`Merging geometry... ${pct}%`);
-      });
+      }, signal);
+
+      if (signal.aborted) return;
+
       const mergeTime = ((performance.now() - mergeStart) / 1000).toFixed(1);
       console.log(`[Viewer] mergeForRendering: ${mergeTime}s`);
 
@@ -170,7 +197,10 @@ export class Viewer {
       if (this.viewMode === 'shaded-wireframe') {
         this._onMergeProgress?.('Creating edges...');
         const edgeStart = performance.now();
-        await this.modelLoader.createEdges(this.edgeThreshold);
+        await this.modelLoader.createEdges(this.edgeThreshold, signal);
+
+        if (signal.aborted) return;
+
         const edgeTime = ((performance.now() - edgeStart) / 1000).toFixed(1);
         console.log(`[Viewer] createEdges: ${edgeTime}s`);
       }
@@ -178,10 +208,16 @@ export class Viewer {
       this._onMergeProgress?.(null); // 완료
       console.log(`[Viewer] Background optimization complete`);
     } catch (err) {
+      if (signal.aborted) {
+        console.log('[Viewer] Background merge aborted (new model loading)');
+        return;
+      }
       console.error('[Viewer] Background merge error:', err);
       this._onMergeProgress?.(null);
     } finally {
-      this.isMerging = false;
+      if (!signal.aborted) {
+        this.isMerging = false;
+      }
     }
   }
 
@@ -228,7 +264,9 @@ export class Viewer {
         } else {
           this._setMeshVisibility(true, false);
         }
-        if (this.modelLoader.edgeLines.length === 0) {
+        // 엣지가 없고 백그라운드 병합이 진행 중이 아닐 때만 생성
+        // (병합 중이면 _mergeInBackground에서 생성함)
+        if (this.modelLoader.edgeLines.length === 0 && !this.isMerging) {
           await this.modelLoader.createEdges(this.edgeThreshold);
         }
         this.modelLoader.setEdgesVisible(true);
@@ -297,6 +335,58 @@ export class Viewer {
   /** 배경색 변경 */
   setBackgroundColor(hexColor) {
     this.scene.background = new THREE.Color(hexColor);
+  }
+
+  /** 주변광 강도 배율 설정 */
+  setAmbientIntensity(multiplier) {
+    this.lightManager.setAmbientIntensity(multiplier);
+  }
+
+  /** 직접광 강도 배율 설정 */
+  setDirectionalIntensity(multiplier) {
+    this.lightManager.setDirectionalIntensity(multiplier);
+  }
+
+  /** 환경맵 활성화/비활성화 */
+  setEnvMapEnabled(enabled) {
+    this.lightManager.setEnvMapEnabled(enabled);
+  }
+
+  /** 환경맵 강도 설정 */
+  setEnvMapIntensity(intensity) {
+    this.lightManager.setEnvMapIntensity(intensity);
+  }
+
+  /**
+   * 모델 재질의 metalness/roughness 오버라이드
+   * @param {number|null} metalness - 0~1 또는 null(원본 유지)
+   * @param {number|null} roughness - 0~1 또는 null(원본 유지)
+   */
+  setMaterialProperties(metalness, roughness) {
+    const applyToMats = (mats) => {
+      mats.forEach(mat => {
+        if (metalness !== null && mat.metalness !== undefined) mat.metalness = metalness;
+        if (roughness !== null && mat.roughness !== undefined) mat.roughness = roughness;
+        mat.needsUpdate = true;
+      });
+    };
+
+    // 원본 메시
+    const model = this.modelLoader.model;
+    if (model) {
+      model.traverse((child) => {
+        if (child.isMesh && child.material) {
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
+          applyToMats(mats);
+        }
+      });
+    }
+
+    // 병합 메시
+    for (const mesh of this.modelLoader.geometryMerger.mergedMeshes) {
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      applyToMats(mats);
+    }
   }
 
   // ───── Stats Display ─────
