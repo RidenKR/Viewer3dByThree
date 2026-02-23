@@ -42,6 +42,7 @@ export class CameraManager {
     this.onNavigationStart = null;
     this.onNavigationEnd = null;
     this._navEndTimer = null;
+    this._isNavigating = false;
 
     this._setupInteraction();
   }
@@ -135,8 +136,12 @@ export class CameraManager {
     // Zoom (휠 — 모든 모드에서 작동)
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
-      this._zoomCamera(e.deltaY);
+      // deltaMode 정규화: 0=pixel, 1=line(×16), 2=page(×400)
+      let deltaY = e.deltaY;
+      if (e.deltaMode === 1) deltaY *= 16;
+      else if (e.deltaMode === 2) deltaY *= 400;
       this._notifyNavStart();
+      this._zoomCamera(deltaY);
       this._notifyNavEnd();
     }, { passive: false });
   }
@@ -599,12 +604,16 @@ export class CameraManager {
       clearTimeout(this._navEndTimer);
       this._navEndTimer = null;
     }
-    this.onNavigationStart?.();
+    if (!this._isNavigating) {
+      this._isNavigating = true;
+      this.onNavigationStart?.();
+    }
   }
 
   _notifyNavEnd() {
     if (this._navEndTimer) clearTimeout(this._navEndTimer);
     this._navEndTimer = setTimeout(() => {
+      this._isNavigating = false;
       this.onNavigationEnd?.();
       this._navEndTimer = null;
     }, 150);

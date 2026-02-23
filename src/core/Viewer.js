@@ -94,13 +94,20 @@ export class Viewer {
     this._setupAxisHelper();
 
     // FastNav: 네비게이션 중 픽셀 비율 감소로 성능 향상
+    // basePixelRatio가 1.5 미만이면 효과가 미미하고 캔버스 크기 변경으로 떨림만 발생하므로 비활성화
+    const fastNavRatio = Math.min(this.basePixelRatio, 1);
+    const fastNavEnabled = this.basePixelRatio >= 1.5;
     this.cameraManager.onNavigationStart = () => {
       this.isNavigating = true;
-      this.renderer.setPixelRatio(Math.min(this.basePixelRatio, 1));
+      if (fastNavEnabled && this.renderer.getPixelRatio() !== fastNavRatio) {
+        this.renderer.setPixelRatio(fastNavRatio);
+      }
     };
     this.cameraManager.onNavigationEnd = () => {
       this.isNavigating = false;
-      this.renderer.setPixelRatio(this.basePixelRatio);
+      if (fastNavEnabled && this.renderer.getPixelRatio() !== this.basePixelRatio) {
+        this.renderer.setPixelRatio(this.basePixelRatio);
+      }
     };
 
     // Resize
@@ -469,6 +476,11 @@ export class Viewer {
   _onResize() {
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
+
+    // 실제 크기 변경이 없으면 무시 (iframe 환경에서 불필요한 resize 이벤트 방지)
+    if (this._lastWidth === width && this._lastHeight === height) return;
+    this._lastWidth = width;
+    this._lastHeight = height;
 
     this.renderer.setSize(width, height);
     this.cameraManager.onResize(width, height);
