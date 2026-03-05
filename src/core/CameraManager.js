@@ -45,6 +45,7 @@ export class CameraManager {
     this._isNavigating = false;
 
     this._setupInteraction();
+    this._setupKeyboardRotation();
   }
 
   // ───── 통합 인터랙션 Setup ─────
@@ -146,6 +147,76 @@ export class CameraManager {
     }, { passive: false });
   }
 
+  // ───── Keyboard Rotation (방향키 회전) ─────
+
+  /**
+   * 방향키로 카메라 회전 (테스트용)
+   * ← → : 수평 회전 (Y축)
+   * ↑ ↓ : 수직 회전 (X축)
+   * Shift + 방향키: 속도 5배
+   */
+  _setupKeyboardRotation() {
+    this._keysDown = new Set();
+    this._keyRotateStep = 8; // 픽셀 단위 (마우스 드래그와 동일한 스케일)
+    this._keyRotateRAF = null;
+
+    const onKeyDown = (e) => {
+      const arrows = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+      if (!arrows.includes(e.key)) return;
+
+      // 입력창(input/textarea)에 포커스가 있으면 무시
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      e.preventDefault();
+      this._keysDown.add(e.key);
+      if (!this._keyRotateRAF) this._startKeyRotateLoop();
+    };
+
+    const onKeyUp = (e) => {
+      this._keysDown.delete(e.key);
+      if (this._keysDown.size === 0) {
+        this._stopKeyRotateLoop();
+        this._notifyNavEnd();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+
+    // dispose 시 정리용 참조 보관
+    this._keyListeners = { onKeyDown, onKeyUp };
+  }
+
+  _startKeyRotateLoop() {
+    this._notifyNavStart();
+    const loop = () => {
+      if (this._keysDown.size === 0) { this._keyRotateRAF = null; return; }
+
+      const step = this._keysDown.has('Shift')
+        ? this._keyRotateStep * 5
+        : this._keyRotateStep;
+
+      let dx = 0, dy = 0;
+      if (this._keysDown.has('ArrowLeft'))  dx = -step;
+      if (this._keysDown.has('ArrowRight')) dx =  step;
+      if (this._keysDown.has('ArrowUp'))    dy = -step;
+      if (this._keysDown.has('ArrowDown'))  dy =  step;
+
+      if (dx !== 0 || dy !== 0) this._rotateCamera(dx, dy);
+
+      this._keyRotateRAF = requestAnimationFrame(loop);
+    };
+    this._keyRotateRAF = requestAnimationFrame(loop);
+  }
+
+  _stopKeyRotateLoop() {
+    if (this._keyRotateRAF) {
+      cancelAnimationFrame(this._keyRotateRAF);
+      this._keyRotateRAF = null;
+    }
+  }
+
   // ───── Custom Orbit (트랙볼 자유 회전) ─────
 
   /**
@@ -162,19 +233,19 @@ export class CameraManager {
     // target → camera 벡터
     const offset = new THREE.Vector3().subVectors(activeCamera.position, this.target);
 
-    // 카메라 로컬 right 축 (화면 가로 방향)
-    const right = new THREE.Vector3()
-      .crossVectors(activeCamera.up, offset)
-      .normalize();
+    // 수평 회전: 항상 월드 Y축 기준 (Maya 스타일 — up 누적 오류 없음)
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    const quatX = new THREE.Quaternion().setFromAxisAngle(worldUp, angleX);
+    offset.applyQuaternion(quatX);
 
-    // 수직 회전: right 축 기준
+    // 수직 회전: 로컬 right 축 기준
+    // right = worldUp × offset (수평 회전 적용된 offset 기준)
+    const right = new THREE.Vector3().crossVectors(worldUp, offset).normalize();
     const quatY = new THREE.Quaternion().setFromAxisAngle(right, angleY);
     offset.applyQuaternion(quatY);
-    activeCamera.up.applyQuaternion(quatY);
 
-    // 수평 회전: 카메라 up 축 기준
-    const quatX = new THREE.Quaternion().setFromAxisAngle(activeCamera.up, angleX);
-    offset.applyQuaternion(quatX);
+    // camera.up 항상 월드 Y 고정 (비틀림 방지)
+    activeCamera.up.copy(worldUp);
 
     // 카메라 위치 = target + 회전된 offset
     activeCamera.position.copy(this.target).add(offset);
@@ -639,6 +710,10 @@ export class CameraManager {
   }
 
   dispose() {
-    // 이벤트 리스너 정리는 canvas가 제거될 때 자동으로 처리됨
+    this._stopKeyRotateLoop();
+    if (this._keyListeners) {
+      window.removeEventListener('keydown', this._keyListeners.onKeyDown);
+      window.removeEventListener('keyup', this._keyListeners.onKeyUp);
+    }
   }
 }
