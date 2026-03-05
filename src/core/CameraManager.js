@@ -38,6 +38,9 @@ export class CameraManager {
     this._lastY = 0;
     this._rotateSpeed = 0.005;
 
+    // 회전 모드: 'maya' (수평=월드Y 고정, polar 제한) | 'trackball' (완전 자유 회전)
+    this.rotateMode = 'maya';
+
     // FastNav 콜백
     this.onNavigationStart = null;
     this.onNavigationEnd = null;
@@ -225,31 +228,83 @@ export class CameraManager {
    * - 화면 Y축 드래그 → 카메라 right 기준 수직 회전
    */
   _rotateCamera(dx, dy) {
+    if (this.rotateMode === 'trackball') {
+      this._rotateCameraTrackball(dx, dy);
+    } else {
+      this._rotateCameraMaya(dx, dy);
+    }
+  }
+
+  /** Maya 스타일: 수평=월드Y 고정, 수직=로컬Right, polar 제한(5°~175°) */
+  _rotateCameraMaya(dx, dy) {
     const activeCamera = this.getActiveCamera();
 
     const angleX = -dx * this._rotateSpeed;
     const angleY = -dy * this._rotateSpeed;
 
-    // target → camera 벡터
     const offset = new THREE.Vector3().subVectors(activeCamera.position, this.target);
-
-    // 수평 회전: 항상 월드 Y축 기준 (Maya 스타일 — up 누적 오류 없음)
     const worldUp = new THREE.Vector3(0, 1, 0);
+
+    // 수평 회전: 월드 Y축 기준
     const quatX = new THREE.Quaternion().setFromAxisAngle(worldUp, angleX);
     offset.applyQuaternion(quatX);
 
-    // 수직 회전: 로컬 right 축 기준
-    // right = worldUp × offset (수평 회전 적용된 offset 기준)
+    // 수직 회전: 로컬 right 축 + polar 제한
     const right = new THREE.Vector3().crossVectors(worldUp, offset).normalize();
-    const quatY = new THREE.Quaternion().setFromAxisAngle(right, angleY);
-    offset.applyQuaternion(quatY);
+    const polarMin = 5   * (Math.PI / 180);
+    const polarMax = 175 * (Math.PI / 180);
+    const currentPolar = offset.angleTo(worldUp);
+    const newPolar = currentPolar + angleY;
 
-    // camera.up 항상 월드 Y 고정 (비틀림 방지)
+    if (newPolar >= polarMin && newPolar <= polarMax) {
+      const quatY = new THREE.Quaternion().setFromAxisAngle(right, angleY);
+      offset.applyQuaternion(quatY);
+    } else {
+      const clampAngle = Math.max(polarMin, Math.min(polarMax, newPolar)) - currentPolar;
+      if (Math.abs(clampAngle) > 1e-6) {
+        const quatY = new THREE.Quaternion().setFromAxisAngle(right, clampAngle);
+        offset.applyQuaternion(quatY);
+      }
+    }
+
     activeCamera.up.copy(worldUp);
-
-    // 카메라 위치 = target + 회전된 offset
     activeCamera.position.copy(this.target).add(offset);
     activeCamera.lookAt(this.target);
+  }
+
+  /** 트랙볼 스타일: 완전 자유 회전, gimbal lock 없음 (up 누적 오류 주의) */
+  _rotateCameraTrackball(dx, dy) {
+    const activeCamera = this.getActiveCamera();
+
+    const angleX = -dx * this._rotateSpeed;
+    const angleY = -dy * this._rotateSpeed;
+
+    const offset = new THREE.Vector3().subVectors(activeCamera.position, this.target);
+
+    // 수직 회전: 로컬 right 축 기준
+    const right = new THREE.Vector3()
+      .crossVectors(activeCamera.up, offset)
+      .normalize();
+    const quatY = new THREE.Quaternion().setFromAxisAngle(right, angleY);
+    offset.applyQuaternion(quatY);
+    activeCamera.up.applyQuaternion(quatY);
+
+    // 수평 회전: 현재 camera.up 기준
+    const quatX = new THREE.Quaternion().setFromAxisAngle(activeCamera.up, angleX);
+    offset.applyQuaternion(quatX);
+
+    activeCamera.position.copy(this.target).add(offset);
+    activeCamera.lookAt(this.target);
+  }
+
+  /** 회전 모드 전환 ('maya' ↔ 'trackball') */
+  toggleRotateMode() {
+    this.rotateMode = this.rotateMode === 'maya' ? 'trackball' : 'maya';
+    // 트랙볼→Maya 전환 시 up 벡터 정규화
+    if (this.rotateMode === 'maya') {
+      this.getActiveCamera().up.set(0, 1, 0);
+    }
+    return this.rotateMode;
   }
 
   // ───── Custom Pan (모델 크기 기반) ─────

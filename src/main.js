@@ -749,6 +749,18 @@ function setupSettingsPanel() {
     });
   });
 
+  // 회전 모드
+  const rotateModeSelect = document.getElementById('rotate-mode-select');
+  if (rotateModeSelect) {
+    rotateModeSelect.addEventListener('change', (e) => {
+      viewer.cameraManager.rotateMode = e.target.value;
+      // 트랙볼→Maya 전환 시 up 벡터 정규화
+      if (e.target.value === 'maya') {
+        viewer.cameraManager.getActiveCamera().up.set(0, 1, 0);
+      }
+    });
+  }
+
   // 배경색
   const bgPresets = document.querySelectorAll('.bg-preset');
   const bgColorInput = document.getElementById('bg-color-input');
