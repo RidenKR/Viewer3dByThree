@@ -250,7 +250,13 @@ export class CameraManager {
     offset.applyQuaternion(quatX);
 
     // 수직 회전: 로컬 right 축 + polar 제한
-    const right = new THREE.Vector3().crossVectors(worldUp, offset).normalize();
+    // Top/Bottom 뷰에서 offset이 worldUp과 평행하면 right가 zero vector → camera.up 기준 fallback
+    let right = new THREE.Vector3().crossVectors(worldUp, offset);
+    if (right.lengthSq() < 1e-10) {
+      right.crossVectors(activeCamera.up, offset);
+    }
+    right.normalize();
+
     const polarMin = 5   * (Math.PI / 180);
     const polarMax = 175 * (Math.PI / 180);
     const currentPolar = offset.angleTo(worldUp);

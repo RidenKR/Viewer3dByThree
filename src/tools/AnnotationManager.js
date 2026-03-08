@@ -218,6 +218,15 @@ export class AnnotationManager {
     // 연결선 최종 업데이트
     this._updateConnector(pa, pa._markerScreenX, pa._markerScreenY);
 
+    // 텍스트박스 크기 조정 시 연결선 업데이트
+    const resizeObserver = new ResizeObserver(() => {
+      const markerX = parseInt(pa.marker.style.left) + 7;
+      const markerY = parseInt(pa.marker.style.top) + 7;
+      this._updateConnector(pa, markerX, markerY);
+    });
+    resizeObserver.observe(pa.label);
+    pa._resizeObserver = resizeObserver;
+
     this.annotations.push(pa);
     this._pendingAnnotation = null;
 
@@ -464,6 +473,7 @@ export class AnnotationManager {
   // ───── Annotation Management ─────
 
   _removeParts(a) {
+    if (a._resizeObserver) { a._resizeObserver.disconnect(); a._resizeObserver = null; }
     if (a.marker) a.marker.remove();
     if (a.label) a.label.remove();
     if (a.connector) a.connector.remove();
